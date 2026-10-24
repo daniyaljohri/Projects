@@ -181,6 +181,8 @@ The last message should be `All data quality checks passed`.
 
 **Weather join.** Weather is matched on the seller's city and the date the order was handed to the carrier. That's where and when the shipment starts moving. It matches 37% of order lines, because weather was downloaded for the 13 largest cities only.
 
+**Columnstore fact table.** `gold.fact_orders` is stored as a clustered columnstore index. Analytical queries scan a few columns across many rows, which column storage handles far better than row storage, and it compresses the table heavily. The primary key stays as a nonclustered index for lookups.
+
 **MERGE fact load.** `gold.load_fact_orders` updates changed rows, inserts new ones and deletes rows that left silver, so `fact_key` values stay stable between runs.
 
 ---
