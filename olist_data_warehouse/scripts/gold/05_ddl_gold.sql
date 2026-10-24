@@ -146,7 +146,12 @@ SELECT
 		ELSE payment_type
 	END AS payment_type_display,
 	CASE WHEN payment_type = 'not_defined' THEN 0 ELSE 1 END AS is_valid_payment_type
-FROM (SELECT DISTINCT payment_type FROM silver.oms_olist_order_payments_dataset) t;
+FROM (SELECT DISTINCT payment_type FROM silver.oms_olist_order_payments_dataset) t
+
+UNION ALL
+
+-- orders with no payment record
+SELECT -1, 'unknown', 'Unknown', 0;
 GO
 
 CREATE OR ALTER VIEW gold.v_dim_weather
