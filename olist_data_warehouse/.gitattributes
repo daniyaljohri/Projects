@@ -1,0 +1,2 @@
+# Keep data files byte-for-byte as downloaded so BULK INSERT behaves the same on every machine
+*.csv -text
