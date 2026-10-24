@@ -1,0 +1,13 @@
+# Olist CSVs come from Kaggle, see DATA_SOURCES.md
+datasets/core/
+
+# SQL Server backups and SSMS files
+*.bak
+.vs/
+
+# draw.io backups
+*.bkp
+
+# OS files
+Thumbs.db
+.DS_Store
