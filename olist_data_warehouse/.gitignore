@@ -1,0 +1,25 @@
+# Raw Olist CSVs: download from Kaggle (see DATA_SOURCES.md), not redistributed here
+datasets/core/
+
+# Local configuration and secrets
+config.ini
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# SQL Server / SSMS artefacts
+*.bak
+*.mdf
+*.ldf
+.vs/
+
+# draw.io backups
+*.bkp
+*.drawio.bkp
+
+# OS files
+Thumbs.db
+.DS_Store
