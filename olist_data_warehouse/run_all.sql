@@ -1,5 +1,6 @@
 /*
-	Builds the whole warehouse from scratch: database, bronze, silver, gold.
+	Builds the whole warehouse from scratch: database, bronze, silver, gold,
+	then runs the data quality checks.
 
 	1. Set repo_path below to where this folder lives on your machine (no spaces in the path).
 	2. In SSMS turn on Query > SQLCMD Mode.
@@ -27,3 +28,5 @@ EXEC silver.load_silver;
 GO
 EXEC gold.load_fact_orders;
 GO
+
+:r $(repo_path)\tests\data_quality_checks.sql
