@@ -207,6 +207,12 @@ Checks are either **errors** (pipeline bugs, which fail the build) or **warnings
 
 ---
 
+## Known limitations
+
+- **Dimension keys** are generated with `ROW_NUMBER()`, so they're only stable because every build reloads all layers together. For a warehouse that receives new data over time, the dimensions would become tables with `IDENTITY` keys loaded by MERGE.
+
+---
+
 ## Data sources
 
 | Source | Used for |
