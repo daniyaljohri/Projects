@@ -248,7 +248,7 @@ olist_data_warehouse/
 
 ## Author
 
-**Daniyal Johri**, Data and Analytics, BI engineering
+**Daniyal Johri**, Analytics Engineer
 [GitHub](https://github.com/daniyaljohri) · [LinkedIn](https://www.linkedin.com/in/daniyaljohri/)
 
 Originally built March to May 2026 and restructured for reproducibility in October 2026. The original design and SQL are my own. Restructuring, tests, and documentation were assisted by Claude.
