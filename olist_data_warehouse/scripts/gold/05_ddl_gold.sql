@@ -182,7 +182,7 @@ GO
 
 DROP TABLE IF EXISTS gold.fact_orders;
 CREATE TABLE gold.fact_orders (
-	fact_key                        INT IDENTITY(1,1) PRIMARY KEY,
+	fact_key                        INT IDENTITY(1,1) PRIMARY KEY NONCLUSTERED,
 	order_id                        CHAR(32)        NOT NULL,
 	order_item_id                   INT             NOT NULL,
 	date_key                        INT             NOT NULL,
@@ -205,4 +205,7 @@ CREATE TABLE gold.fact_orders (
 	order_delivered_customer_date   DATETIME2,
 	order_estimated_delivery_date   DATETIME2
 );
+
+-- column storage: compresses well and suits scans and aggregations
+CREATE CLUSTERED COLUMNSTORE INDEX cci_fact_orders ON gold.fact_orders;
 GO
