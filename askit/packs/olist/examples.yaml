@@ -1,0 +1,97 @@
+dialect: tsql
+examples:
+  - question: How many orders are in the data?
+    sql: |
+      SELECT COUNT(DISTINCT order_id) AS total_orders
+      FROM chatbot.v_orders_full;
+
+  - question: What is the average order value of delivered orders?
+    sql: |
+      SELECT AVG(order_revenue_brl) AS avg_order_value_brl
+      FROM (
+          SELECT order_id, SUM(revenue_brl) AS order_revenue_brl
+          FROM chatbot.v_orders_full
+          WHERE order_status = 'delivered'
+          GROUP BY order_id
+      ) AS orders;
+
+  - question: How many orders and how much revenue came from São Paulo city?
+    sql: |
+      SELECT
+          COUNT(DISTINCT order_id) AS total_orders,
+          SUM(revenue_brl) AS total_revenue_brl
+      FROM chatbot.v_orders_full
+      WHERE customer_city = 'sao paulo';
+
+  - question: Who are the top 10 sellers by revenue?
+    sql: |
+      SELECT TOP 10
+          seller_id, seller_city, seller_state, seller_tier,
+          total_revenue_brl, avg_review_score, late_delivery_rate_pct
+      FROM chatbot.v_seller_summary
+      ORDER BY total_revenue_brl DESC;
+
+  - question: Which product categories have the worst late delivery rates?
+    sql: |
+      SELECT TOP 10
+          product_category, late_delivery_rate_pct, total_orders, avg_review_score
+      FROM chatbot.v_product_summary
+      WHERE total_orders >= 50
+      ORDER BY late_delivery_rate_pct DESC;
+
+  - question: Which sellers are hurting customers most through bad reviews and late deliveries?
+    sql: |
+      SELECT TOP 15
+          seller_id, seller_city, seller_state, total_orders,
+          avg_review_score, late_delivery_rate_pct, negative_review_count, total_revenue_brl
+      FROM chatbot.v_seller_summary
+      WHERE total_orders >= 10
+      ORDER BY avg_review_score ASC, late_delivery_rate_pct DESC;
+
+  - question: How did monthly orders and revenue trend in 2017 and 2018?
+    sql: |
+      SELECT year, month, month_name, total_orders, total_revenue_brl,
+             late_delivery_rate_pct, avg_review_score
+      FROM chatbot.v_monthly_trends
+      WHERE year IN (2017, 2018)
+      ORDER BY year, month;
+
+  - question: Which high churn risk customers spent the most?
+    sql: |
+      SELECT TOP 20
+          customer_unique_id, customer_city, customer_state,
+          total_revenue_brl, total_orders, days_since_last_order
+      FROM chatbot.v_customer_summary
+      WHERE churn_risk = 'High'
+      ORDER BY total_revenue_brl DESC;
+
+  - question: What is the average review score by payment type?
+    sql: |
+      SELECT
+          payment_type,
+          COUNT(*) AS total_orders,
+          AVG(CAST(review_score AS FLOAT)) AS avg_review_score
+      FROM (
+          SELECT order_id, MAX(payment_type) AS payment_type, MAX(review_score) AS review_score
+          FROM chatbot.v_orders_full
+          WHERE order_status = 'delivered'
+          GROUP BY order_id
+      ) AS orders
+      GROUP BY payment_type
+      ORDER BY avg_review_score DESC;
+
+  - question: What share of delivered orders were late, by customer state?
+    sql: |
+      SELECT
+          customer_state,
+          COUNT(*) AS delivered_orders,
+          SUM(is_late) AS late_orders,
+          ROUND(100.0 * SUM(is_late) / COUNT(*), 1) AS late_rate_pct
+      FROM (
+          SELECT order_id, MAX(customer_state) AS customer_state, MAX(is_late) AS is_late
+          FROM chatbot.v_orders_full
+          WHERE order_status = 'delivered'
+          GROUP BY order_id
+      ) AS orders
+      GROUP BY customer_state
+      ORDER BY late_rate_pct DESC;
