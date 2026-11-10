@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from decimal import Decimal
 
@@ -5,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import askit.api as api
+import askit.feedback as feedback
 from askit.db import QueryResult
 from askit.pipeline import Answer
 
@@ -19,6 +21,7 @@ class FakeAskit:
     def __init__(self):
         self.calls = []
         self.pack = type("P", (), {"name": "olist", "display_name": "Olist", "suggested_questions": ["Q1"]})()
+        self.settings = type("S", (), {"model": "test-model"})()
 
     def ask(self, question, history=None):
         self.calls.append((question, list(history or [])))
@@ -28,10 +31,11 @@ class FakeAskit:
 
 
 @pytest.fixture
-def client(monkeypatch):
+def client(monkeypatch, tmp_path):
     fake = FakeAskit()
     monkeypatch.setattr(api, "_askit", fake)
     monkeypatch.setattr(api, "sessions", {})
+    monkeypatch.setattr(feedback, "FEEDBACK_LOG", tmp_path / "feedback.jsonl")
     return TestClient(api.app), fake
 
 
@@ -89,3 +93,24 @@ def test_empty_question_is_rejected(client):
 def test_pack_info(client):
     http, _ = client
     assert http.get("/pack").json()["suggested_questions"] == ["Q1"]
+
+
+def test_feedback_is_saved_with_the_question_and_sql(client):
+    http, _ = client
+    answer = http.post("/chat", json={"question": "Revenue by year", "session_id": "s1"}).json()
+
+    response = http.post("/feedback", json={"session_id": "s1", "answer_id": answer["id"], "rating": "down", "comment": "wrong year"})
+    assert response.json() == {"saved": True}
+
+    record = json.loads(feedback.FEEDBACK_LOG.read_text().splitlines()[0])
+    assert record["rating"] == "down"
+    assert record["comment"] == "wrong year"
+    assert record["sql"] == "SELECT 1"
+    assert record["model"] == "test-model"
+
+
+def test_feedback_validation(client):
+    http, _ = client
+    answer = http.post("/chat", json={"question": "Revenue by year", "session_id": "s1"}).json()
+    assert http.post("/feedback", json={"session_id": "s1", "answer_id": answer["id"], "rating": "meh"}).status_code == 422
+    assert http.post("/feedback", json={"session_id": "s1", "answer_id": "nope", "rating": "up"}).status_code == 404

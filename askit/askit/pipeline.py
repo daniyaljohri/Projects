@@ -67,6 +67,7 @@ class Askit:
         LOG_PATH.parent.mkdir(exist_ok=True)
         record = {
             "time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "id": answer.id,
             "pack": self.pack.name,
             "model": self.settings.model,
             "question": answer.question,

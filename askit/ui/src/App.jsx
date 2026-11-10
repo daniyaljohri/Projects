@@ -11,6 +11,23 @@ const OUTCOME_NOTES = {
   failed: "The query failed",
 };
 
+// saved questions live in this browser only; there are no user accounts to store them against
+function loadSaved(packName) {
+  try {
+    return JSON.parse(localStorage.getItem(`askit:saved:${packName}`)) ?? [];
+  } catch {
+    return [];
+  }
+}
+
+function storeSaved(packName, questions) {
+  try {
+    localStorage.setItem(`askit:saved:${packName}`, JSON.stringify(questions));
+  } catch {
+    // storage can be blocked (private windows); saving then lasts until the page closes
+  }
+}
+
 function newSessionId() {
   return crypto.randomUUID();
 }
@@ -124,7 +141,61 @@ function DownloadButton({ sessionId, answerId }) {
   );
 }
 
-function Message({ message, sessionId }) {
+function Feedback({ sessionId, answerId }) {
+  const [rating, setRating] = useState(null);
+  const [comment, setComment] = useState("");
+  const [state, setState] = useState("idle");
+
+  async function save(value, note = "") {
+    setState("saving");
+    try {
+      await api("/feedback", {
+        method: "POST",
+        body: JSON.stringify({ session_id: sessionId, answer_id: answerId, rating: value, comment: note }),
+      });
+      setState("saved");
+    } catch {
+      setState("error");
+    }
+  }
+
+  function rate(value) {
+    setRating(value);
+    if (value === "up") save("up");
+  }
+
+  if (state === "saved") return <span className="feedback-note">Thanks for the feedback</span>;
+  if (state === "error") return <span className="feedback-note error-text">Couldn't save feedback</span>;
+
+  return (
+    <div className="feedback">
+      <button className={`thumb ${rating === "up" ? "picked" : ""}`} onClick={() => rate("up")} title="Good answer" disabled={state === "saving"}>👍</button>
+      <button className={`thumb ${rating === "down" ? "picked" : ""}`} onClick={() => rate("down")} title="Wrong or unhelpful" disabled={state === "saving"}>👎</button>
+      {rating === "down" && (
+        <form
+          className="feedback-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            save("down", comment);
+          }}
+        >
+          <input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="What was wrong? (optional)" maxLength={1000} autoFocus />
+          <button className="chip" type="submit" disabled={state === "saving"}>Send</button>
+        </form>
+      )}
+    </div>
+  );
+}
+
+function SaveButton({ saved, onToggle }) {
+  return (
+    <button className={`chip ${saved ? "saved" : ""}`} onClick={onToggle} title={saved ? "Remove from saved questions" : "Save this question"}>
+      {saved ? "★ Saved" : "☆ Save question"}
+    </button>
+  );
+}
+
+function Message({ message, sessionId, saved, onToggleSave }) {
   if (message.role === "user") {
     return <div className="message user"><div className="bubble">{message.text}</div></div>;
   }
@@ -139,12 +210,12 @@ function Message({ message, sessionId }) {
         {hasRows && (
           <ResultTable columns={message.columns} rows={message.rows} rowCount={message.rowCount} truncated={message.truncated} />
         )}
-        {(message.sql || hasRows) && (
-          <div className="actions">
-            {message.sql && <SqlToggle sql={message.sql} error={message.error} />}
-            {hasRows && <DownloadButton sessionId={sessionId} answerId={message.id} />}
-          </div>
-        )}
+        <div className="actions">
+          {message.sql && <SqlToggle sql={message.sql} error={message.error} />}
+          {hasRows && <DownloadButton sessionId={sessionId} answerId={message.id} />}
+          <SaveButton saved={saved} onToggle={onToggleSave} />
+          <Feedback sessionId={sessionId} answerId={message.id} />
+        </div>
       </div>
     </div>
   );
@@ -152,6 +223,7 @@ function Message({ message, sessionId }) {
 
 export default function App() {
   const [pack, setPack] = useState(null);
+  const [saved, setSaved] = useState([]);
   const [status, setStatus] = useState("connecting");
   const [sessionId, setSessionId] = useState(newSessionId);
   const [messages, setMessages] = useState([]);
@@ -166,6 +238,7 @@ export default function App() {
       .then((response) => response.json())
       .then((data) => {
         setPack(data);
+        setSaved(loadSaved(data.name));
         setStatus("connected");
       })
       .catch((err) => {
@@ -203,6 +276,7 @@ export default function App() {
         {
           role: "assistant",
           id: data.id,
+          question: text,
           outcome: data.outcome,
           text: data.answer,
           sql: data.sql,
@@ -221,6 +295,12 @@ export default function App() {
     }
   }
 
+  function toggleSaved(question) {
+    const next = saved.includes(question) ? saved.filter((q) => q !== question) : [...saved, question];
+    setSaved(next);
+    storeSaved(pack?.name ?? "default", next);
+  }
+
   function clearConversation() {
     api(`/sessions/${sessionId}`, { method: "DELETE" }).catch(() => {});
     setSessionId(newSessionId());
@@ -235,7 +315,17 @@ export default function App() {
         <div className="logo">Askit</div>
         <div className="tagline">Ask your data anything</div>
 
-        {pack?.suggested_questions?.length > 0 && <div className="section-label">Try asking</div>}
+        {saved.length > 0 && <div className="section-label">Saved</div>}
+        {saved.map((question) => (
+          <div key={question} className="saved-item">
+            <button className="suggestion" onClick={() => send(question)} disabled={loading}>
+              {question}
+            </button>
+            <button className="remove" onClick={() => toggleSaved(question)} title="Remove" aria-label={`Remove ${question}`}>×</button>
+          </div>
+        ))}
+
+        {pack?.suggested_questions?.length > 0 && <div className={`section-label ${saved.length ? "spaced" : ""}`}>Try asking</div>}
         {pack?.suggested_questions?.map((question) => (
           <button key={question} className="suggestion" onClick={() => send(question)} disabled={loading}>
             {question}
@@ -263,7 +353,13 @@ export default function App() {
           )}
 
           {messages.map((message, i) => (
-            <Message key={i} message={message} sessionId={sessionId} />
+            <Message
+              key={i}
+              message={message}
+              sessionId={sessionId}
+              saved={saved.includes(message.question)}
+              onToggleSave={() => toggleSaved(message.question)}
+            />
           ))}
 
           {loading && (

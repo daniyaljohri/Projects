@@ -44,6 +44,7 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  overflow-y: auto;
   padding: 20px;
 }
 
@@ -79,6 +80,33 @@ button:disabled {
 
 .suggestion:hover:not(:disabled) {
   background: rgba(29, 158, 117, 0.2);
+}
+
+.section-label.spaced {
+  margin-top: 12px;
+}
+
+.saved-item {
+  display: flex;
+  gap: 4px;
+}
+
+.saved-item .suggestion {
+  flex: 1;
+}
+
+.remove {
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 16px;
+  padding: 0 6px;
+}
+
+.remove:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
 }
 
 .spacer {
@@ -307,6 +335,12 @@ tbody tr:nth-child(even) {
   padding: 3px 10px;
 }
 
+.chip.saved {
+  background: #fff8e1;
+  border-color: #e0a800;
+  color: #8a6400;
+}
+
 .chip.primary {
   background: var(--brand);
   color: #fff;
@@ -314,6 +348,53 @@ tbody tr:nth-child(even) {
 
 .chip.primary:hover:not(:disabled) {
   background: var(--brand-dark);
+}
+
+.feedback {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.thumb {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: 14px;
+  opacity: 0.45;
+  padding: 1px 5px;
+}
+
+.thumb:hover:not(:disabled),
+.thumb.picked {
+  border-color: var(--line);
+  opacity: 1;
+}
+
+.feedback-form {
+  display: flex;
+  gap: 6px;
+}
+
+.feedback-form input {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 8px;
+  width: 220px;
+}
+
+.feedback-note {
+  color: var(--muted);
+  font-size: 12px;
+  margin-left: auto;
+}
+
+.error-text {
+  color: #c62828;
 }
 
 .sql {

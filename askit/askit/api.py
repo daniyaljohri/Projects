@@ -1,12 +1,14 @@
 from datetime import date, datetime
 from decimal import Decimal
 from io import BytesIO
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from askit import feedback
 from askit.config import ConfigError, get_settings
 from askit.db import DatabaseError
 from askit.export import build_workbook, filename_for
@@ -47,6 +49,13 @@ def get_askit() -> Askit:
 class ChatRequest(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
     session_id: str = Field(default="default", max_length=100)
+
+
+class FeedbackRequest(BaseModel):
+    session_id: str = Field(max_length=100)
+    answer_id: str = Field(max_length=64)
+    rating: Literal["up", "down"]
+    comment: str = Field(default="", max_length=1000)
 
 
 class ExportRequest(BaseModel):
@@ -127,6 +136,24 @@ async def export(request: ExportRequest):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@app.post("/feedback")
+async def give_feedback(request: FeedbackRequest):
+    answer = next((a for a in sessions.get(request.session_id, []) if a.id == request.answer_id), None)
+    if answer is None:
+        raise HTTPException(status_code=404, detail="That answer is no longer in this session.")
+
+    askit = get_askit()
+    feedback.record_feedback(
+        feedback.FEEDBACK_LOG,
+        answer=answer,
+        pack=askit.pack.name,
+        model=askit.settings.model,
+        rating=request.rating,
+        comment=request.comment,
+    )
+    return {"saved": True}
 
 
 @app.delete("/sessions/{session_id}")
