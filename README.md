@@ -9,6 +9,7 @@ I learn by doing. This repo is where I build things end to end, break them, fix 
 | Project | What it is | Stack |
 |---|---|---|
 | [Olist Data Warehouse](olist_data_warehouse) | A medallion data warehouse on Brazilian e-commerce data, enriched with weather, exchange rates, holidays, population and macro data to test what drives late deliveries and bad reviews. | SQL Server, T-SQL |
+| [Askit](askit) | Ask a database questions in plain English. Claude writes the SQL, a read-only login and query checks keep it safe, and a small data pack describes each database. Runs on the Olist warehouse or a portable SQLite copy. | Python, FastAPI, Claude API, React, SQL Server, SQLite |
 
 More to come.
 
