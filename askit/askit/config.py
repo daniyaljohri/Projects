@@ -34,7 +34,7 @@ def _required(name: str) -> str:
 
 
 @lru_cache
-def get_settings() -> Settings:
+def get_settings(require_pack: bool = True) -> Settings:
     load_dotenv(PROJECT_ROOT / ".env")
 
     dialect = _required("ASKIT_DB_DIALECT").lower()
@@ -54,7 +54,7 @@ def get_settings() -> Settings:
         db_connection=connection,
     )
 
-    if not settings.pack_dir.is_dir():
+    if require_pack and not settings.pack_dir.is_dir():
         raise ConfigError(f"Data pack '{settings.pack}' not found at {settings.pack_dir}.")
 
     return settings

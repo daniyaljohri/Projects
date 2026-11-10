@@ -118,6 +118,22 @@ class LLM:
 
         raise LLMError("Claude did not return a query or a reason to decline.")
 
+    def call_tool(self, system: str, message: str, tool: dict, usage: Usage, max_tokens: int) -> dict:
+        response = self._call(
+            usage,
+            max_tokens=max_tokens,
+            system=system,
+            tools=[tool],
+            tool_choice={"type": "tool", "name": tool["name"]},
+            messages=[{"role": "user", "content": message}],
+        )
+        if response.stop_reason == "max_tokens":
+            raise LLMError("Claude's reply was cut off at the token limit. Try fewer tables at a time.")
+        for block in response.content:
+            if block.type == "tool_use":
+                return block.input
+        raise LLMError(f"Claude did not call {tool['name']}.")
+
     def narrate(self, question: str, result: QueryResult, usage: Usage) -> str:
         response = self._call(
             usage,

@@ -50,14 +50,14 @@ class Database:
         import pyodbc
         return (pyodbc.Error,)
 
-    def _connect(self):
+    def _connect(self, timeout: int):
         if self.dialect == "sqlite":
             path = Path(self.connection)
             if not path.exists():
                 raise DatabaseError(f"SQLite file not found: {path}")
             # mode=ro: the file itself refuses writes, the SQLite version of a read-only login
             conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
-            deadline = time.monotonic() + QUERY_TIMEOUT_SECONDS
+            deadline = time.monotonic() + timeout
             conn.set_progress_handler(lambda: int(time.monotonic() > deadline), 10_000)
             return conn
 
@@ -65,17 +65,17 @@ class Database:
         import pyodbc
 
         conn = pyodbc.connect(self.connection, autocommit=True, timeout=LOGIN_TIMEOUT_SECONDS)
-        conn.timeout = QUERY_TIMEOUT_SECONDS
+        conn.timeout = timeout
         cursor = conn.cursor()
         # SSMS runs with ARITHABORT ON and ODBC does not; without it the same query can get a much slower plan
         cursor.execute("SET ARITHABORT ON")
         cursor.close()
         return conn
 
-    def run(self, sql: str, max_rows: int = MAX_ROWS) -> QueryResult:
+    def run(self, sql: str, max_rows: int = MAX_ROWS, timeout: int = QUERY_TIMEOUT_SECONDS) -> QueryResult:
         driver_errors = self._driver_errors()
         try:
-            conn = self._connect()
+            conn = self._connect(timeout)
         except driver_errors as error:
             raise DatabaseError(f"Could not connect to {self.describe()}: {error}") from error
 
