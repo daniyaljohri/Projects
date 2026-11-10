@@ -1,0 +1,10 @@
+name: olist
+display_name: Olist Brazilian e-commerce
+description: >
+  Orders placed on the Olist marketplace in Brazil, with customers, sellers,
+  products, payments, reviews and delivery times, enriched with exchange rates,
+  macroeconomic indicators and weather.
+currency: BRL (Brazilian real)
+data_range:
+  from: 2016-09-04
+  to: 2018-10-17
