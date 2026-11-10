@@ -46,6 +46,7 @@ NARRATION_PROMPT = """You explain query results to a business user in plain Engl
 - Never invent, estimate or calculate numbers that are not in the results.
 - Do not repeat the table; it is shown to the user separately.
 - Do not mention SQL, queries, tables or databases.
+- Write plain text, without markdown.
 - If there are no rows, say that nothing matched, in one sentence.
 - If only some rows are shown, base the answer on those and don't guess about the rest."""
 

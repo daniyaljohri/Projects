@@ -1,5 +1,6 @@
 import json
 import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -24,6 +25,7 @@ class Answer:
     error: str | None = None
     usage: Usage = field(default_factory=Usage)
     seconds: float = 0.0
+    id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 
 class Askit:

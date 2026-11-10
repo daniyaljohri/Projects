@@ -66,6 +66,16 @@ def test_export_uses_the_last_result(client):
     assert response.content[:2] == b"PK"
 
 
+def test_export_picks_the_requested_answer(client):
+    http, _ = client
+    first = http.post("/chat", json={"question": "Revenue by year", "session_id": "s1"}).json()
+    http.post("/chat", json={"question": "Revenue for SP", "session_id": "s1"})
+
+    response = http.post("/export", json={"session_id": "s1", "answer_id": first["id"]})
+    assert response.headers["content-disposition"] == 'attachment; filename="revenue_by_year.xlsx"'
+    assert http.post("/export", json={"session_id": "s1", "answer_id": "unknown"}).status_code == 404
+
+
 def test_export_without_results(client):
     http, _ = client
     assert http.post("/export", json={"session_id": "new"}).status_code == 404

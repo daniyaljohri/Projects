@@ -51,6 +51,7 @@ class ChatRequest(BaseModel):
 
 class ExportRequest(BaseModel):
     session_id: str = Field(default="default", max_length=100)
+    answer_id: str | None = Field(default=None, max_length=64)
 
 
 def _json_value(value):
@@ -67,6 +68,7 @@ def _answer_json(answer: Answer) -> dict:
     if result:
         rows = [{c: _json_value(row[c]) for c in result.columns} for row in result.rows[:DISPLAY_ROWS]]
     return {
+        "id": answer.id,
         "outcome": answer.outcome,
         "answer": answer.text,
         "sql": answer.sql,
@@ -111,12 +113,15 @@ async def chat(request: ChatRequest):
 @app.post("/export")
 async def export(request: ExportRequest):
     history = sessions.get(request.session_id, [])
-    last = next((a for a in reversed(history) if a.result and a.result.rows), None)
-    if last is None:
-        raise HTTPException(status_code=404, detail="There are no results to export yet.")
+    candidates = [a for a in history if a.result and a.result.rows]
+    if request.answer_id:
+        candidates = [a for a in candidates if a.id == request.answer_id]
+    if not candidates:
+        raise HTTPException(status_code=404, detail="There are no results to export for this answer.")
 
-    content = build_workbook(last.result, last.question, last.sql)
-    filename = filename_for(last.question)
+    answer = candidates[-1]
+    content = build_workbook(answer.result, answer.question, answer.sql)
+    filename = filename_for(answer.question)
     return StreamingResponse(
         BytesIO(content),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
