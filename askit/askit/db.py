@@ -27,13 +27,15 @@ class QueryResult:
 
 
 class Database:
-    def __init__(self, dialect: str, connection: str):
+    def __init__(self, dialect: str, connection: str, schemas: tuple[str, ...] = ()):
         self.dialect = dialect
         self.connection = connection
+        # SQLite has no schemas; the file is attached under each schema name so chatbot.v_orders_full still resolves
+        self.schemas = schemas
 
     @classmethod
-    def from_settings(cls, settings: Settings) -> "Database":
-        return cls(settings.db_dialect, settings.db_connection)
+    def from_settings(cls, settings: Settings, schemas: tuple[str, ...] = ()) -> "Database":
+        return cls(settings.db_dialect, settings.db_connection, schemas)
 
     def describe(self) -> str:
         if self.dialect == "sqlite":
@@ -56,7 +58,10 @@ class Database:
             if not path.exists():
                 raise DatabaseError(f"SQLite file not found: {path}")
             # mode=ro: the file itself refuses writes, the SQLite version of a read-only login
-            conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+            uri = f"file:{path.as_posix()}?mode=ro"
+            conn = sqlite3.connect(uri, uri=True)
+            for schema in self.schemas:
+                conn.execute(f'ATTACH DATABASE ? AS "{schema}"', (uri,))
             deadline = time.monotonic() + timeout
             conn.set_progress_handler(lambda: int(time.monotonic() > deadline), 10_000)
             return conn
@@ -95,7 +100,7 @@ class Database:
 
     def list_tables(self) -> list[str]:
         if self.dialect == "sqlite":
-            sql = "SELECT name FROM sqlite_master WHERE type IN ('table', 'view') ORDER BY name"
+            sql = "SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name"
         else:
             sql = (
                 "SELECT TABLE_SCHEMA + '.' + TABLE_NAME AS name "

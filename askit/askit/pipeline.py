@@ -32,7 +32,7 @@ class Askit:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.pack = load_pack(settings.pack_dir)
-        self.db = Database.from_settings(settings)
+        self.db = Database.from_settings(settings, self.pack.schemas)
         self.llm = LLM(settings)
         self.system_prompt = build_system_prompt(self.pack, settings.db_dialect)
 

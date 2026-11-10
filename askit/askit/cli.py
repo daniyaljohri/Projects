@@ -12,6 +12,7 @@ from askit.onboard import draft_pack, write_draft
 from askit.pack import PackError, load_pack
 from askit.pipeline import Answer, Askit
 from askit.prompt import build_system_prompt
+from askit.sqlite_export import export_pack
 
 PREVIEW_ROWS = 10
 
@@ -137,6 +138,24 @@ def init(args) -> int:
     return 0
 
 
+def export_sqlite(args) -> int:
+    settings = get_settings()
+    pack = load_pack(settings.pack_dir)
+    out = args.out or f"data/{pack.name}.sqlite"
+    out_path = PROJECT_ROOT / out
+    if out_path.exists() and not args.force:
+        print(f"Error: {out} already exists. Use --force to replace it.", file=sys.stderr)
+        return 1
+
+    source = Database.from_settings(settings, pack.schemas)
+    print(f"Copying pack '{pack.name}' from {source.describe()} to {out}")
+    counts = export_pack(source, pack, out_path)
+    size_mb = out_path.stat().st_size / 1_048_576
+    print(f"\nDone: {len(counts)} tables, {sum(counts.values()):,} rows, {size_mb:.1f} MB")
+    print(f"To use it, set ASKIT_DB_DIALECT=sqlite and ASKIT_DB_CONNECTION={out}")
+    return 0
+
+
 def serve(args) -> int:
     import uvicorn
 
@@ -166,6 +185,11 @@ def main(argv: list[str] | None = None) -> int:
     init_parser.add_argument("--no-llm", action="store_true", help="profile only; leave descriptions for you to write")
     init_parser.add_argument("--force", action="store_true", help="overwrite an existing pack")
     init_parser.set_defaults(func=init)
+
+    export_parser = commands.add_parser("export-sqlite", help="copy the pack's tables into a SQLite file")
+    export_parser.add_argument("--out", help="output path relative to the project folder (default data/<pack>.sqlite)")
+    export_parser.add_argument("--force", action="store_true", help="replace an existing file")
+    export_parser.set_defaults(func=export_sqlite)
 
     serve_parser = commands.add_parser("serve", help="start the API for the web UI")
     serve_parser.add_argument("--port", type=int, default=8000)

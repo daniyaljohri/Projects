@@ -44,6 +44,10 @@ class Pack:
     suggested_questions: list[str] = field(default_factory=list)
 
     @property
+    def schemas(self) -> tuple[str, ...]:
+        return tuple(sorted({t.name.split(".")[0] for t in self.tables if "." in t.name}))
+
+    @property
     def allowed_tables(self) -> set[str]:
         return {table.name.lower() for table in self.tables}
 
