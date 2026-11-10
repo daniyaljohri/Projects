@@ -8,3 +8,10 @@ currency: BRL (Brazilian real)
 data_range:
   from: 2016-09-04
   to: 2018-10-17
+suggested_questions:
+  - What was total revenue and order count by month in 2018?
+  - Who are the top 10 sellers by revenue?
+  - Which product categories have the lowest review scores?
+  - What share of delivered orders were late in each state?
+  - Which high churn risk customers spent the most?
+  - How did monthly orders relate to the BRL/USD exchange rate?

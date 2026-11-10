@@ -41,6 +41,7 @@ class Pack:
     rules: list[str]
     examples: list[Example]
     examples_dialect: str
+    suggested_questions: list[str] = field(default_factory=list)
 
     @property
     def allowed_tables(self) -> set[str]:
@@ -105,4 +106,5 @@ def load_pack(pack_dir: Path) -> Pack:
             for e in examples.get("examples") or []
         ],
         examples_dialect=examples.get("dialect", "tsql"),
+        suggested_questions=[str(q) for q in info.get("suggested_questions") or []],
     )

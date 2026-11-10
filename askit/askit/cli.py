@@ -88,6 +88,14 @@ def chat(_args) -> int:
     return 0
 
 
+def serve(args) -> int:
+    import uvicorn
+
+    get_settings()
+    uvicorn.run("askit.api:app", host="127.0.0.1", port=args.port)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="askit", description="Ask questions about a database in plain English.")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -100,6 +108,10 @@ def main(argv: list[str] | None = None) -> int:
     ask_parser.set_defaults(func=ask)
 
     commands.add_parser("chat", help="ask several questions, with follow-ups").set_defaults(func=chat)
+
+    serve_parser = commands.add_parser("serve", help="start the API for the web UI")
+    serve_parser.add_argument("--port", type=int, default=8000)
+    serve_parser.set_defaults(func=serve)
 
     args = parser.parse_args(argv)
     try:
