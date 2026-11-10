@@ -85,12 +85,12 @@ tables:
       - name: revenue_usd
         description: line revenue converted to USD at that day's rate
       - name: temp_avg_c
-        description: average temperature in the customer city on the purchase date; NULL if no weather data
+        description: average temperature in the customer city on the purchase date; NULL for about 63% of rows, where the city has no weather data
       - name: precipitation_category
-        description: rain on the purchase date
+        description: rain on the purchase date; NULL when there is no weather data
         values: [Heavy Rain, Light Rain, Drizzle, No Rain]
       - name: temp_category
-        description: band of the day's maximum temperature
+        description: band of the day's maximum temperature; NULL when there is no weather data
         values: [Hot, Warm, Cool, Cold]
       - name: order_purchase_timestamp
         description: purchase date and time
@@ -132,7 +132,7 @@ tables:
       - name: avg_delivery_days
         description: average days from purchase to delivery
       - name: days_since_last_order
-        description: days from the last order to the end of the data
+        description: days from the last order to the end of the data (2018-09-03)
       - name: last_order_date
         description: date and time of the last order
       - name: first_order_date
@@ -291,4 +291,5 @@ rules:
   - "States are two-letter codes: 'SP', 'RJ'."
   - When ranking by an average or a rate, require a minimum volume so tiny sellers or categories don't top the list (sellers total_orders >= 10, categories total_orders >= 50).
   - Relative dates like "last month" or "this year" refer to the end of the data, not today.
-  - The first few months (late 2016) and the last two months (September and October 2018) have very few orders.
+  - The data runs from September 2016 to early September 2018. 2016 and 2018 are partial years, late 2016 and September 2018 have very few orders, and November 2016 has none, so say so when comparing years or those months.
+  - Weather columns cover only about a third of orders; mention this whenever weather is part of an answer.
