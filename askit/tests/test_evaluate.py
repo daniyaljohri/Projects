@@ -155,7 +155,7 @@ def test_run_records_answer_and_reference(shop, tmp_path):
     assert answered["result"]["rows"] == [[2]]
     assert answered["reference"]["result"]["rows"] == [[2]]
     assert answered["reference"]["error"] is None
-    assert answered["usage"] == {"calls": 2, "input_tokens": 200, "output_tokens": 40, "cache_read_tokens": 160}
+    assert answered["usage"] == {"calls": 2, "input_tokens": 200, "output_tokens": 40, "cache_read_tokens": 160, "cache_write_tokens": 0}
 
     assert declined["outcome"] == "declined"
     assert declined["expects_decline"] is True
@@ -185,4 +185,19 @@ def test_claude_error_does_not_stop_the_run(shop, tmp_path):
 
     assert record["outcome"] == "error"
     assert "did not return a query" in record["error"]
+    assert record["reference"]["result"]["rows"] == [[2]]
+
+
+def test_unexpected_error_does_not_stop_the_run(shop, tmp_path, monkeypatch):
+    _, questions = load_questions(write_questions(tmp_path, ORDERS_QUESTION))
+    askit = make_askit(shop, FakeClaude())
+
+    def broken(question, history=None):
+        raise ValueError("something unexpected")
+    monkeypatch.setattr(askit, "ask", broken)
+
+    [record] = run_eval(askit, questions, "tsql", tmp_path / "r.jsonl", progress=lambda _: None)
+
+    assert record["outcome"] == "error"
+    assert record["error"] == "ValueError: something unexpected"
     assert record["reference"]["result"]["rows"] == [[2]]

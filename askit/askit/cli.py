@@ -13,6 +13,7 @@ from askit.onboard import draft_pack, write_draft
 from askit.pack import PackError, load_pack
 from askit.pipeline import Answer, Askit
 from askit.prompt import build_system_prompt
+from askit.scoring import write_summary
 from askit.sqlite_export import export_pack
 
 PREVIEW_ROWS = 10
@@ -179,18 +180,35 @@ def evaluate(args) -> int:
     records = run_eval(askit, questions, reference_dialect, out_path, args.tag,
                        questions_file.relative_to(PROJECT_ROOT).as_posix())
 
-    outcomes = {}
-    for record in records:
-        outcomes[record["outcome"]] = outcomes.get(record["outcome"], 0) + 1
-    tokens = {key: sum(r["usage"][key] for r in records) for key in ("input_tokens", "output_tokens", "cache_read_tokens")}
     reference_errors = [r["id"] for r in records if r["reference"] and r["reference"]["error"]]
-
-    print("\nOutcomes: " + ", ".join(f"{name} {count}" for name, count in sorted(outcomes.items())))
-    print(f"Tokens: {tokens['input_tokens']:,} in, {tokens['output_tokens']:,} out, {tokens['cache_read_tokens']:,} cached")
-    print(f"Seconds: {sum(r['seconds'] for r in records):.1f} total")
+    summary_path = write_summary(out_path)
+    print("\n" + _accuracy_lines(summary_path))
+    print(f"\nSummary: {summary_path.relative_to(PROJECT_ROOT).as_posix()}")
     if reference_errors:
         print(f"Reference query errors (fix these first): {', '.join(reference_errors)}")
     return 0
+
+
+def eval_report(args) -> int:
+    path = PROJECT_ROOT / args.results
+    summary_path = write_summary(path)
+    print(_accuracy_lines(summary_path))
+    print(f"\nSummary: {_shown(summary_path)}")
+    return 0
+
+
+def _shown(path) -> str:
+    # relative inside the project, full path for files kept elsewhere
+    return path.relative_to(PROJECT_ROOT).as_posix() if path.is_relative_to(PROJECT_ROOT) else str(path)
+
+
+def _accuracy_lines(summary_path) -> str:
+    # the headline and category table from the summary, so the console and the file always agree
+    lines = summary_path.read_text(encoding="utf-8").splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("**Accuracy"))
+    end = lines.index("## Cost and speed")
+    cost = [line for line in lines[end:] if line.startswith("- ")][:4]
+    return "\n".join(lines[start:end] + cost).strip()
 
 
 def serve(args) -> int:
@@ -237,6 +255,10 @@ def main(argv: list[str] | None = None) -> int:
     eval_parser.add_argument("--category", help="only this category")
     eval_parser.add_argument("--limit", type=int, help="only the first N questions, for cheap test runs")
     eval_parser.set_defaults(func=evaluate)
+
+    report_parser = commands.add_parser("eval-report", help="score a saved evaluation run and write its summary (no API key needed)")
+    report_parser.add_argument("results", help="result file, relative to the project folder (e.g. eval/results/<run>.jsonl) or a full path")
+    report_parser.set_defaults(func=eval_report)
 
     serve_parser = commands.add_parser("serve", help="start the API for the web UI")
     serve_parser.add_argument("--port", type=int, default=8000)

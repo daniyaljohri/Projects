@@ -143,9 +143,11 @@ def _evaluate_one(askit: Askit, question: Question, reference_dialect: str, dial
     try:
         # no history: each question is judged on its own
         answer = askit.ask(question.question)
-    except (LLMError, DatabaseError) as error:
-        record.update(outcome="error", text="", sql=None, error=str(error), result=None, seconds=0.0,
-                      usage={"calls": 0, "input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0})
+    except Exception as error:
+        # one broken question must not end a paid-for run; the error is kept and scored as a failure
+        message = str(error) if isinstance(error, (LLMError, DatabaseError)) else f"{type(error).__name__}: {error}"
+        record.update(outcome="error", text="", sql=None, error=message, result=None, seconds=0.0,
+                      usage={"calls": 0, "input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0})
     else:
         record.update(
             outcome=answer.outcome,
@@ -159,6 +161,7 @@ def _evaluate_one(askit: Askit, question: Question, reference_dialect: str, dial
                 "input_tokens": answer.usage.input_tokens,
                 "output_tokens": answer.usage.output_tokens,
                 "cache_read_tokens": answer.usage.cache_read_tokens,
+                "cache_write_tokens": answer.usage.cache_write_tokens,
             },
         )
 
