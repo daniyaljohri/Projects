@@ -18,8 +18,9 @@ It isn't tied to one database. Everything Askit knows about a database lives in 
 | Model | Claude (Haiku tier by default, configurable) |
 | Safety | Read-only login, SQL parsed and checked before it runs, row and time limits |
 | Interfaces | Web UI (React), REST API (FastAPI), command line |
-| Tests | 102 automated tests, no database or API key needed |
-| Status | Phase 1 (engine) complete. Evaluation results are in progress. |
+| Accuracy | 80 to 84% on 49 business questions (Haiku, SQLite), 100% of unsafe or out-of-scope requests refused. See [Evaluation](#evaluation) |
+| Cost | About one US cent for all 49 questions, 2.2 seconds per answer |
+| Tests | 142 automated tests, no database or API key needed |
 
 ---
 
@@ -43,6 +44,91 @@ Every answer ends in one of four outcomes, shown in the UI and the logs:
 | declined | Claude decided the data can't answer the question, so nothing ran |
 | blocked | the guardrails rejected the query before it reached the database |
 | failed | the database returned an error |
+
+---
+
+## Evaluation
+
+Askit is measured, not just demonstrated. A text-to-SQL tool rarely fails visibly: a wrong query usually returns a confident, plausible number. So every claim below comes from a repeatable run that anyone can re-score without an API key.
+
+### How it is measured
+
+- **49 questions** in [`packs/olist/eval/questions.yaml`](packs/olist/eval/questions.yaml), in nine categories: simple, aggregation, join and detail, date and time, ranking, complex (window functions, CTEs, views joined to each other), ambiguous, out of scope, and adversarial (writes, other schemas, prompt injection).
+- **Reference SQL** for the 41 answerable questions, written in T-SQL and checked by hand in SSMS against the warehouse's known figures. Several questions are deliberate traps: counting orders rather than line items, late rate per delivered order, averages per order, a month with no orders.
+- **Execution accuracy:** Askit's result is compared with the reference result, not the SQL text. Column names are ignored and extra columns are allowed, row order counts only where the question asks for a ranking, whole numbers must match exactly and decimals within 0.5%. The full rules are printed in every summary.
+- **Refusals:** out-of-scope and adversarial questions pass only when Askit declines or the guardrails block the query.
+- Each question is asked once, with no conversation history, through the same pipeline the UI uses.
+
+### Results
+
+Claude Haiku 5.5 on the SQLite copy, November 2026. Two runs of the curated `olist` pack, and one run of `olist_draft`, the pack `askit init` drafted on its own, kept unedited as a control.
+
+| Category | Questions | Curated, run 1 | Curated, run 2 | Drafted |
+|---|---:|---:|---:|---:|
+| Simple | 6 | 6 | 6 | 6 |
+| Aggregation | 7 | 6 | 6 | 5 |
+| Join and detail | 5 | 5 | 5 | 5 |
+| Date and time | 6 | 5 | 5 | 4 |
+| Ranking | 6 | 5 | 5 | 3 |
+| Complex | 8 | 4 | 3 | 5 |
+| Ambiguous | 3 | 2 | 1 | 1 |
+| Out of scope | 3 | 3 | 3 | 3 |
+| Adversarial | 5 | 5 | 5 | 5 |
+| **Total** | **49** | **41 (84%)** | **39 (80%)** | **37 (76%)** |
+
+- **Cost and speed:** about $0.011 per full run of 49 questions at list prices (two API calls per question, with the system prompt cached), 2.2 to 2.4 seconds per answer.
+- **SQL Server:** a spot check of six questions across the categories on the real warehouse scored 6 of 6, at 5.4 seconds per answer.
+- **Run-to-run variation:** the two curated runs differ by two questions. Eight failures were identical in both, so they are real weaknesses rather than noise.
+
+### What fails
+
+The eight failures common to both curated runs:
+
+| Question | What happened |
+|---|---|
+| Average review score | Averaged over line items instead of orders (4.03 instead of 4.10). The grain trap the question was written to catch |
+| Highest revenue month, highest late-rate state | The right answer in the first row, followed by four runners-up. Scored as wrong because "which one" means one row; counting these as right would give 43 and 41 of 49 |
+| Month-over-month growth in 2018 | Calculated it for 2017 as well |
+| Top category per state, repeat rate by first review | Long multi-step queries ended with a stray `"`, so the guardrails could not parse them and blocked them. The same glitch hit a third complex query in run 2 |
+| Platinum sellers' share of revenue | Used the seller tier on the orders view, where it doesn't exist, instead of joining to the seller summary |
+| "Is the business growing?" | Listed all 24 months with a sensible written answer, but not the like-for-like January to August comparison the reference uses |
+
+Simple and join questions were answered correctly every time, and every out-of-scope, write and injection attempt was refused in every run. Complex questions are the weak spot, at 3 to 5 of 8.
+
+### What a reviewed pack adds
+
+The drafted pack scored 37 of 49, against 39 and 41 for the curated pack. The total hides the clearer finding: five questions failed with the drafted pack that the curated pack answered correctly in both runs, and four of them map to a business rule written into the curated pack.
+
+| Questions | Drafted pack's mistake | Curated pack's rule |
+|---|---|---|
+| Late delivery rate, delivery time by year | Calculated per line item; its own drafted example teaches this | Late rate is late delivered orders over delivered orders |
+| Best-reviewed categories, sellers with the most late deliveries | No minimum volume, so a category with 14 sales and sellers with one late order (100%) top the lists | Rankings by a rate or average need at least 10 orders per seller, 50 per category |
+| Weekend share of revenue | Returned weekday and weekend rows (the right figure, in the wrong shape) | None; a model slip |
+
+The drafted pack did no worse on complex questions, which fail for reasons the pack can't fix. That is where the next phase starts.
+
+### Reproduce it
+
+The result files are committed in [`eval/results/`](eval/results/): one JSON line per question with the generated SQL, both result sets, tokens and timing, plus a markdown summary. To re-score a run without an API key or a database:
+
+```
+python -m askit eval-report eval/results/2026-11-11_claude-haiku-5-5_olist_sqlite_baseline.jsonl
+```
+
+To run the evaluation yourself (SQLite setup from Option A, and an API key):
+
+```
+python -m askit eval --tag mine
+python -m askit eval --pack olist_draft --questions packs/olist/eval/questions.yaml --tag drafted
+python -m askit eval --only s01 a02 c04        a few questions, for a cheap check
+```
+
+### Limits of this evaluation
+
+- 49 questions is a small set, and the questions were written alongside the curated pack, so they may favour its rules. Phase 4 runs Askit on a public benchmark it has never seen.
+- One model and one database. Results on SQL Server were spot-checked, not run in full.
+- With 49 questions one question is two points, and runs vary by about two questions, so small differences are not meaningful.
+- Ambiguous questions are scored against one chosen interpretation, so a sensible answer of a different shape counts as wrong.
 
 ---
 
@@ -147,7 +233,7 @@ python -m askit init --pack mydb --schema sales
 
 `init` profiles every table the login can see (row counts, distinct values, null rates, ranges and common values), then asks Claude to draft descriptions, rules, examples and suggested questions. Column names and value lists always come from the database, not from the model, and a drafted example is kept only if it passes the guardrails and actually runs. `--no-llm` profiles only and leaves the descriptions to you.
 
-A drafted pack is a starting point. On Olist, the draft got the table grains and data quirks right (it even caught a wrong end date in the hand-written pack), but it couldn't know business definitions such as churn thresholds or seller tiers, and one of its examples counted line items where it should have counted orders. Measuring that gap is part of the evaluation.
+A drafted pack is a starting point. On Olist, the draft got the table grains and data quirks right (it even caught a wrong end date in the hand-written pack), but it couldn't know business definitions such as churn thresholds or seller tiers, and one of its examples measured late deliveries per line item where it should have counted orders. The [evaluation](#what-a-reviewed-pack-adds) measures what that review adds: the unedited draft is kept in `packs/olist_draft` for comparison.
 
 ### The Olist views
 
@@ -177,16 +263,16 @@ Askit reads five views in a separate `chatbot` schema built on the warehouse's g
 
 ## Tests and checks
 
-- **102 pytest tests** that need no database and no API key: guardrail rules (allowed and blocked queries for both dialects), the data pack (every example passes the guardrails and uses only documented columns), every Olist example translated to SQLite and run, the question pipeline with Claude replaced by a stand-in, the API, the Excel export, pack drafting and the SQLite export.
+- **142 pytest tests** that need no database and no API key: guardrail rules (allowed and blocked queries for both dialects), the data pack (every example passes the guardrails and uses only documented columns), every Olist example translated to SQLite and run, the question pipeline with Claude replaced by a stand-in, the API, the Excel export, pack drafting, the SQLite export, the evaluation runner and every scoring rule.
 - **The view script checks itself**: row counts and revenue reconcile to the fact table, and each summary view has one row per key.
 - **The login script checks itself**: it impersonates `askit_reader` and fails if the login can read the raw layers or has any write permission.
-- **Evaluation** (in progress): a set of business questions with reference SQL, scored by comparing result sets, reported per category with cost and response time.
+- **Evaluation:** 49 business questions with reference SQL, scored by comparing result sets. See [Evaluation](#evaluation).
 
 ---
 
 ## Known limitations
 
-- **Accuracy hasn't been measured yet.** That is the next phase. Until then, check the SQL behind any answer you rely on.
+- **Complex questions are unreliable.** Multi-step queries with window functions or several CTEs were right 3 to 5 times out of 8 in the evaluation. Check the SQL behind any answer you rely on, especially for those.
 - **One question at a time.** The API handles requests on its main thread, because `pyodbc` with Windows authentication hung when called from worker threads.
 - **Local use only.** There are no user accounts. Saved questions are kept in each browser, and conversations are kept in memory until the API restarts.
 - **Result limits.** Queries stop after 30 seconds and 5,000 rows.
@@ -221,8 +307,12 @@ askit/
 │   ├── introspect.py         schema profiling
 │   ├── onboard.py            data pack drafting
 │   ├── sqlite_export.py      SQLite copy of a pack
-│   └── cli.py                check, prompt, ask, chat, serve, init, export-sqlite
-├── packs/olist/              the Olist data pack and its SQL Server setup scripts
+│   ├── evaluate.py           evaluation runner
+│   ├── scoring.py            result comparison and summaries
+│   └── cli.py                check, prompt, ask, chat, serve, init, export-sqlite, eval, eval-report
+├── packs/olist/              the Olist data pack, its evaluation questions and SQL Server setup scripts
+├── packs/olist_draft/        the unedited drafted pack, kept as the evaluation's control
+├── eval/results/             evaluation runs and their summaries
 ├── tests/                    pytest
 ├── ui/                       React chat interface (Vite)
 ├── docs/                     screenshot
@@ -239,4 +329,4 @@ askit/
 **Daniyal Johri**, Analytics Engineer
 [GitHub](https://github.com/daniyaljohri) · [LinkedIn](https://www.linkedin.com/in/daniyaljohri/)
 
-First version built April to September 2026 and rebuilt as a generic engine in November 2026. The idea, product decisions, data warehouse, semantic views and testing on the live database are my own. The Python and React code, tests and documentation were written with Claude (Anthropic); I reviewed, tested and committed every change.
+First version built April to September 2026 and rebuilt as a generic engine in November 2026. The idea, product decisions, data warehouse, semantic views and testing on the live database are my own. The Python and React code, tests and documentation including evaluations and enhancements were written with Claude. I reviewed, tested and committed every change. 
