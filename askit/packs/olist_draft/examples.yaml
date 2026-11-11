@@ -1,0 +1,27 @@
+# Drafted by askit init on 2026-11-11. Review every line before relying on it.
+dialect: tsql
+examples:
+- question: How many distinct orders were placed in 2017?
+  sql: |
+    SELECT COUNT(DISTINCT order_id) AS total_orders FROM chatbot.v_orders_full WHERE order_year = 2017;
+- question: What is total revenue in BRL by product category, top 10?
+  sql: |
+    SELECT TOP 10 product_category, SUM(revenue_brl) AS total_revenue_brl FROM chatbot.v_orders_full GROUP BY product_category ORDER BY SUM(revenue_brl) DESC;
+- question: How many customers are at high churn risk?
+  sql: |
+    SELECT COUNT(*) AS high_risk_customers FROM chatbot.v_customer_summary WHERE churn_risk = 'High';
+- question: Monthly revenue and late delivery rate over time
+  sql: |
+    SELECT year, month, month_name, total_revenue_brl, late_delivery_rate_pct FROM chatbot.v_monthly_trends ORDER BY year, month;
+- question: Which 10 sellers have the highest average review score with at least 100 orders?
+  sql: |
+    SELECT TOP 10 seller_id, seller_city, seller_state, total_orders, avg_review_score FROM chatbot.v_seller_summary WHERE total_orders >= 100 ORDER BY avg_review_score DESC;
+- question: What share of delivered items were late, by customer state?
+  sql: |
+    SELECT customer_state, COUNT(*) AS delivered_items, CAST(SUM(is_late) AS FLOAT) * 100.0 / COUNT(*) AS late_pct FROM chatbot.v_orders_full WHERE order_delivered_customer_date IS NOT NULL GROUP BY customer_state ORDER BY late_pct DESC;
+- question: What is the average order value by payment type?
+  sql: |
+    SELECT payment_type, SUM(revenue_brl) / COUNT(DISTINCT order_id) AS avg_order_value_brl FROM chatbot.v_orders_full GROUP BY payment_type ORDER BY avg_order_value_brl DESC;
+- question: Average customer order value by churn risk segment
+  sql: |
+    SELECT churn_risk, COUNT(*) AS customers, AVG(CAST(avg_order_value_brl AS FLOAT)) AS avg_order_value_brl FROM chatbot.v_customer_summary GROUP BY churn_risk ORDER BY churn_risk;

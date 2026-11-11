@@ -1,0 +1,454 @@
+# Drafted by askit init on 2026-11-11. Review every line before relying on it.
+tables:
+- name: chatbot.v_customer_summary
+  grain: one row per customer (customer_unique_id)
+  description: Customer-level rollup with lifetime orders, revenue, reviews, delivery experience and a churn-risk label. Use
+    it for customer segmentation and churn questions rather than aggregating the line-item table.
+  columns:
+  - name: customer_unique_id
+    description: Unique customer identifier (one row each).
+  - name: customer_city
+    description: Customer city.
+  - name: customer_state
+    description: Customer state code (2-letter).
+  - name: city_size_band
+    description: 'Size band of the customer''s city: Metro, Large, Medium, Small or Unknown.'
+    values:
+    - Metro
+    - Large
+    - Medium
+    - Unknown
+    - Small
+  - name: total_orders
+    description: Number of distinct orders placed by the customer (1 to 16).
+  - name: total_line_items
+    description: Total number of items bought across all orders.
+  - name: total_revenue_brl
+    description: Lifetime revenue in BRL for the customer.
+  - name: avg_order_value_brl
+    description: Average BRL value per order for the customer. Higher means bigger baskets.
+  - name: avg_review_score
+    description: Average review score across the customer's orders, 1 to 5 (higher is better). NULL for about 0.7%.
+  - name: negative_reviews
+    description: Count of negative reviews left by the customer (0 to 3).
+    values:
+    - 0
+    - 1
+    - 2
+    - 3
+  - name: late_deliveries_received
+    description: Count of the customer's orders received late (0 to 3).
+    values:
+    - 0
+    - 1
+    - 2
+    - 3
+  - name: avg_delivery_days
+    description: Average days from order to delivery. NULL for about 1.7% of customers.
+  - name: days_since_last_order
+    description: Days between the last order and the dataset's reference date. Higher means longer inactive.
+  - name: last_order_date
+    description: Timestamp of the customer's most recent order.
+  - name: first_order_date
+    description: Timestamp of the customer's first order.
+  - name: churn_risk
+    description: 'Churn risk label: High, Medium or Low. Derived by the source; the criteria are not visible in the profile.'
+    values:
+    - High
+    - Medium
+    - Low
+  - name: distinct_categories_purchased
+    description: Number of distinct product categories the customer has bought (1 to 5).
+    values:
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+- name: chatbot.v_monthly_trends
+  grain: one row per calendar month (year and month)
+  description: Monthly marketplace totals with late-delivery rates, review averages, and macro context (exchange rate, GDP,
+    inflation, unemployment). Use it for trend charts and month-over-month comparisons; it has 24 rows covering the full period.
+  columns:
+  - name: year
+    description: Calendar year (2016 to 2018).
+    values:
+    - 2017
+    - 2018
+    - 2016
+  - name: month
+    description: Calendar month number (1 to 12).
+  - name: month_name
+    description: English month name.
+    values:
+    - September
+    - February
+    - January
+    - April
+    - December
+    - June
+    - October
+    - July
+    - March
+    - August
+    - May
+    - November
+  - name: quarter
+    description: Calendar quarter (1 to 4).
+    values:
+    - 3
+    - 2
+    - 1
+    - 4
+  - name: year_quarter
+    description: Text label such as 2017-Q4.
+    values:
+    - 2017-Q4
+    - 2018-Q2
+    - 2017-Q2
+    - 2017-Q1
+    - 2017-Q3
+    - 2018-Q3
+    - 2018-Q1
+    - 2016-Q4
+    - 2016-Q3
+  - name: total_orders
+    description: Distinct orders placed in the month.
+  - name: total_line_items
+    description: Number of item lines in the month.
+  - name: total_revenue_brl
+    description: Total revenue in BRL in the month.
+  - name: avg_order_value_brl
+    description: Average BRL value per order in the month (revenue divided by orders).
+  - name: late_deliveries
+    description: Count of late deliveries in the month.
+  - name: delivered_orders
+    description: Count of delivered orders in the month.
+  - name: late_delivery_rate_pct
+    description: Late deliveries as a percentage of delivered orders (0 to 100). NULL when no orders were delivered. Lower
+      is better.
+  - name: avg_review_score
+    description: Average review score in the month (1 to 5). Higher is better.
+  - name: negative_reviews
+    description: Count of negative reviews in the month.
+  - name: unique_customers
+    description: Distinct customers who ordered in the month.
+  - name: avg_brl_usd_rate
+    description: Average BRL to USD exchange rate in the month.
+  - name: avg_gdp_usd
+    description: Macroeconomic GDP figure in USD for the period (unit and source not stated in the profile).
+    values:
+    - '2063510000000.000000'
+    - '1916930000000.000000'
+    - '1795690000000.000000'
+  - name: avg_inflation_pct
+    description: Inflation rate in percent for the period (source not stated).
+    values:
+    - '3.446373'
+    - '3.664850'
+    - '8.739144'
+  - name: avg_unemployment_pct
+    description: Unemployment rate in percent for the period (source not stated).
+    values:
+    - '12.792000'
+    - '12.329000'
+    - '11.580000'
+- name: chatbot.v_orders_full
+  grain: one row per order line item (order_id + order_item_id)
+  description: Main fact table for order-level analysis. Each row is one item within an order, with customer, seller, product,
+    payment, delivery and review attributes. Use it for revenue by item, category, geography, delivery timing and sentiment.
+    order_id is NOT unique, so do not count rows as orders.
+  columns:
+  - name: fact_key
+    description: Surrogate unique row key (1 to 112,650).
+  - name: order_id
+    description: Order identifier. Repeats for orders with multiple items; use COUNT(DISTINCT order_id) for order counts.
+  - name: order_item_id
+    description: Sequence number of the item within the order (1 = first item).
+  - name: order_date
+    description: Date the order was placed (date only).
+  - name: order_year
+    description: Calendar year of order_date (2016 to 2018).
+    values:
+    - 2018
+    - 2017
+    - 2016
+  - name: order_month
+    description: Calendar month number of order_date (1 to 12).
+  - name: order_month_name
+    description: English month name of order_date.
+    values:
+    - August
+    - May
+    - July
+    - March
+    - June
+    - April
+    - February
+    - January
+    - November
+    - December
+    - October
+    - September
+  - name: order_quarter
+    description: Calendar quarter of order_date (1 to 4).
+    values:
+    - 2
+    - 1
+    - 3
+    - 4
+  - name: ordered_on_weekend
+    description: 1 if the order was placed on a Saturday or Sunday, otherwise 0.
+    values:
+    - 0
+    - 1
+  - name: customer_unique_id
+    description: Stable customer identifier across orders. Use this to count distinct customers, not customer_id.
+  - name: customer_city
+    description: City of the customer.
+  - name: customer_state
+    description: Brazilian state code of the customer (2-letter, 27 values).
+  - name: customer_city_size
+    description: 'Size band of the customer''s city: Metro, Large, Medium, Small or Unknown.'
+    values:
+    - Metro
+    - Large
+    - Medium
+    - Unknown
+    - Small
+  - name: seller_id
+    description: Identifier of the seller fulfilling the item.
+  - name: seller_city
+    description: City of the seller.
+  - name: seller_state
+    description: Brazilian state code of the seller (2-letter).
+  - name: seller_city_size
+    description: 'Size band of the seller''s city: Metro, Large, Medium, Small or Unknown.'
+    values:
+    - Metro
+    - Large
+    - Medium
+    - Unknown
+    - Small
+  - name: product_category
+    description: Product category name (74 values, in English-like text).
+  - name: product_weight_g
+    description: Product weight in grams.
+  - name: product_volume_cm3
+    description: Product volume in cubic centimetres.
+  - name: payment_type
+    description: 'Payment method: Credit Card, Boleto, Voucher, Debit Card or Unknown.'
+    values:
+    - Credit Card
+    - Boleto
+    - Voucher
+    - Debit Card
+    - Unknown
+  - name: line_item_price
+    description: Price of this item in BRL, excluding freight.
+  - name: line_item_freight
+    description: Freight cost for this item in BRL.
+  - name: revenue_brl
+    description: Revenue for this line in BRL. Treat as the primary revenue measure for BRL reporting (price plus freight
+      is possible; confirm against line_item_price before assuming).
+  - name: review_score
+    description: Customer review score for the order, 1 (worst) to 5 (best). NULL for about 0.8% of rows. Higher is better.
+    values:
+    - 5
+    - 4
+    - 1
+    - 3
+    - 2
+  - name: review_sentiment
+    description: 'Sentiment label derived from the review: Positive, Negative, Neutral or No Review.'
+    values:
+    - Positive
+    - Negative
+    - Neutral
+    - No Review
+  - name: order_status
+    description: Raw order status (delivered, shipped, canceled, invoiced, processing, unavailable, approved).
+    values:
+    - delivered
+    - shipped
+    - canceled
+    - invoiced
+    - processing
+    - unavailable
+    - approved
+  - name: order_status_label
+    description: Display version of order_status with capitalised labels (Delivered, Cancelled, etc.).
+    values:
+    - Delivered
+    - Shipped
+    - Cancelled
+    - Invoiced
+    - Processing
+    - Unavailable
+    - Approved
+  - name: delivery_delay_days
+    description: Days the delivery was later (positive) or earlier (negative) than the estimated delivery date. NULL for about
+      2.2% of rows (not delivered).
+  - name: transit_days
+    description: Days from purchase to delivery to the customer's hand, negative values present in the data. NULL for about
+      2.2% of rows.
+  - name: order_to_delivery_days
+    description: Days from order placement to customer delivery (0 to 210). NULL for about 2.2% of rows.
+  - name: is_late
+    description: 1 if the item was delivered after the estimated date, otherwise 0.
+    values:
+    - 0
+    - 1
+  - name: delivery_performance
+    description: 'Category: Early, On Time, Slightly Late, Very Late, Not Delivered or Unknown.'
+    values:
+    - Early
+    - On Time
+    - Very Late
+    - Slightly Late
+    - Not Delivered
+    - Unknown
+  - name: brl_usd_rate
+    description: BRL to USD exchange rate on the order date.
+  - name: revenue_usd
+    description: Revenue converted to USD using brl_usd_rate.
+  - name: temp_avg_c
+    description: Average temperature in Celsius on the order date. About 63% NULL, so weather analysis covers a minority of
+      rows.
+  - name: precipitation_category
+    description: Rain category for the order date (No Rain, Light Rain, Drizzle, Heavy Rain). About 63% NULL.
+    values:
+    - No Rain
+    - Light Rain
+    - Drizzle
+    - Heavy Rain
+  - name: temp_category
+    description: Temperature category for the order date (Cold, Cool, Warm, Hot). About 63% NULL.
+    values:
+    - Warm
+    - Cool
+    - Hot
+    - Cold
+  - name: order_purchase_timestamp
+    description: Full timestamp when the order was placed.
+  - name: order_delivered_customer_date
+    description: Timestamp when the item was delivered to the customer. NULL if not delivered.
+  - name: order_estimated_delivery_date
+    description: Estimated delivery timestamp promised at purchase.
+- name: chatbot.v_product_summary
+  grain: one row per product category
+  description: Category-level rollup of units, revenue, pricing, freight share, reviews and delivery lateness. Use it for
+    category comparisons; it has 74 rows.
+  columns:
+  - name: product_category
+    description: Product category name (unique).
+  - name: distinct_products
+    description: Number of distinct products in the category.
+  - name: total_units_sold
+    description: Number of item lines sold in the category.
+  - name: total_orders
+    description: Distinct orders containing the category.
+  - name: total_revenue_brl
+    description: Total revenue in BRL for the category.
+  - name: avg_item_price_brl
+    description: Average item price in BRL (excluding freight).
+  - name: min_item_price_brl
+    description: Lowest item price in BRL.
+  - name: max_item_price_brl
+    description: Highest item price in BRL.
+  - name: avg_freight_brl
+    description: Average freight cost per item in BRL.
+  - name: freight_pct_of_total
+    description: Freight as a percentage of total value (0 to 100). Lower is better for buyers.
+  - name: avg_review_score
+    description: Average review score for the category (1 to 5). Higher is better.
+  - name: negative_reviews
+    description: Count of negative reviews in the category.
+  - name: positive_reviews
+    description: Count of positive reviews in the category.
+  - name: avg_delay_days
+    description: Average delivery delay in days (negative means early). Lower is better.
+  - name: late_deliveries
+    description: Count of late deliveries in the category.
+  - name: late_delivery_rate_pct
+    description: Late deliveries as a percentage of deliveries in the category. Lower is better.
+  - name: avg_weight_g
+    description: Average product weight in grams.
+  - name: avg_volume_cm3
+    description: Average product volume in cubic centimetres.
+- name: chatbot.v_seller_summary
+  grain: one row per seller (seller_id)
+  description: Seller-level rollup of orders, revenue, reviews, delivery lateness and cancellations, with a seller tier label.
+    Use it for seller performance rankings.
+  columns:
+  - name: seller_id
+    description: Unique seller identifier (one row each).
+  - name: seller_city
+    description: Seller city.
+  - name: seller_state
+    description: Seller state code (2-letter).
+  - name: city_size_band
+    description: 'Size band of the seller''s city: Metro, Large, Medium, Small or Unknown.'
+    values:
+    - Large
+    - Metro
+    - Medium
+    - Unknown
+    - Small
+  - name: total_orders
+    description: Distinct orders fulfilled by the seller (includes all statuses).
+  - name: total_line_items
+    description: Item lines sold by the seller.
+  - name: total_revenue_brl
+    description: Total revenue in BRL for the seller.
+  - name: avg_item_value_brl
+    description: Average BRL value per item line.
+  - name: avg_review_score
+    description: Average review score for the seller (1 to 5). Higher is better.
+  - name: negative_review_count
+    description: Count of negative reviews for the seller.
+  - name: positive_review_count
+    description: Count of positive reviews for the seller.
+  - name: late_delivery_count
+    description: Count of late deliveries for the seller.
+  - name: delivered_order_count
+    description: Count of delivered orders for the seller.
+  - name: late_delivery_rate_pct
+    description: Late deliveries as a percentage of delivered orders (0 to 100). Lower is better. NULL when no deliveries.
+  - name: avg_delay_days
+    description: Average delivery delay in days (negative means early). Lower is better.
+  - name: avg_transit_days
+    description: Average transit time in days. Lower is better.
+  - name: cancelled_orders
+    description: Number of cancelled orders for the seller.
+  - name: seller_tier
+    description: 'Seller tier label: Bronze, Silver, Gold or Platinum. Criteria not visible in the profile.'
+    values:
+    - Bronze
+    - Silver
+    - Gold
+    - Platinum
+  - name: first_sale_date
+    description: Timestamp of the seller's first sale.
+  - name: last_sale_date
+    description: Timestamp of the seller's last sale.
+rules:
+- 'Orders vs items: v_orders_full is one row per item. Use COUNT(DISTINCT order_id) for order counts and SUM(revenue_brl)
+  for revenue; never COUNT(*) as an order count.'
+- 'Customers: use customer_unique_id for distinct customers; customer_id is not exposed in these views.'
+- For customer-level questions (segments, churn_risk, lifetime value, days_since_last_order) use v_customer_summary instead
+  of aggregating v_orders_full.
+- For monthly or yearly totals and trends use v_monthly_trends (already aggregated); for year-over-year, filter on year and
+  month columns rather than parsing text.
+- 'Currency: revenue_brl and total_revenue_brl are BRL. revenue_usd and brl_usd_rate are only in v_orders_full. Do not mix
+  BRL and USD in one total.'
+- 'Averages: AVG over INT columns returns an integer in SQL Server; CAST to FLOAT or DECIMAL before averaging counts or ratios,
+  and multiply by 100.0 before dividing counts to get percentages.'
+- 'Late deliveries: is_late = 1 flags a late item; delivery_performance has the categories; NULL delivery dates mean the item
+  was not delivered, so exclude them from delivery-rate denominators.'
+- Review scores are NULL for some rows (about 0.8% in order items); AVG ignores NULLs, but do not treat NULL as zero. Higher
+  review_score is better.
+- Weather columns (temp_avg_c, precipitation_category, temp_category) are NULL for about 63% of rows; say so when reporting
+  weather breakdowns.
+- 'Date range: orders run from 2016-09-04 to 2018-09-03; 2016 and 2018 are partial years, so avoid year-over-year claims without
+  noting this. Use order_date (date type) for date filters.'
