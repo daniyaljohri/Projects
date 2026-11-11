@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 import sqlglot
 from sqlglot import exp
-from sqlglot.errors import ParseError
+from sqlglot.errors import SqlglotError
 
 WRITE_NODES = (
     exp.Insert,
@@ -30,9 +30,10 @@ def check_sql(sql: str, dialect: str, allowed_tables: set[str]) -> CheckedQuery:
     """Reject anything that is not one read-only SELECT over the allowed tables."""
     allowed = {name.lower() for name in allowed_tables}
 
+    # SqlglotError covers parse errors and tokenizer errors, e.g. an unclosed quote around a name
     try:
         statements = [s for s in sqlglot.parse(sql, read=dialect) if s is not None]
-    except ParseError as error:
+    except SqlglotError as error:
         raise GuardrailError(f"The query could not be parsed: {_first_line(error)}") from error
 
     if not statements:
