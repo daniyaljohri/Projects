@@ -94,6 +94,7 @@ def test_blocks_other_databases_and_remote_sources(sql, reason):
         ("", "empty"),
         ("   ;  ", "empty"),
         ("SELEC order_id FORM chatbot.v_orders_full", "could not be parsed"),
+        ('SELECT "state_revenue FROM chatbot.v_orders_full', "could not be parsed"),
         ("SELECT 1", "any allowed table"),
     ],
 )

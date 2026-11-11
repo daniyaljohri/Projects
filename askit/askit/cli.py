@@ -5,6 +5,7 @@ import time
 
 from askit.config import PROJECT_ROOT, ConfigError, get_settings
 from askit.db import Database, DatabaseError, QueryResult
+from askit.evaluate import EvalError, load_questions, result_path, run_eval, select_questions
 from askit.guardrails import GuardrailError
 from askit.introspect import list_columns, profile_table
 from askit.llm import LLM, LLMError, format_value
@@ -12,6 +13,7 @@ from askit.onboard import draft_pack, write_draft
 from askit.pack import PackError, load_pack
 from askit.pipeline import Answer, Askit
 from askit.prompt import build_system_prompt
+from askit.scoring import write_summary
 from askit.sqlite_export import export_pack
 
 PREVIEW_ROWS = 10
@@ -156,6 +158,59 @@ def export_sqlite(args) -> int:
     return 0
 
 
+def evaluate(args) -> int:
+    settings = get_settings(require_pack=False)
+    overrides = {key: value for key, value in (("pack", args.pack), ("model", args.model)) if value}
+    if overrides:
+        settings = dataclasses.replace(settings, **overrides)
+    if not settings.pack_dir.is_dir():
+        raise ConfigError(f"Data pack '{settings.pack}' not found at {settings.pack_dir}.")
+
+    # questions come from the pack by default; --questions lets another pack (e.g. a drafted one) take the same test
+    questions_file = PROJECT_ROOT / (args.questions or f"packs/{settings.pack}/eval/questions.yaml")
+    reference_dialect, questions = load_questions(questions_file)
+    questions = select_questions(questions, args.only, args.category, args.limit)
+
+    askit = Askit(settings)
+    out_path = result_path(settings.model, settings.pack, settings.db_dialect, args.tag)
+    print(f"Pack: {settings.pack} | Model: {settings.model} | Database: {askit.db.describe()}")
+    print(f"Questions: {len(questions)} from {questions_file.relative_to(PROJECT_ROOT).as_posix()}")
+    print(f"Writing {out_path.relative_to(PROJECT_ROOT).as_posix()}\n")
+
+    records = run_eval(askit, questions, reference_dialect, out_path, args.tag,
+                       questions_file.relative_to(PROJECT_ROOT).as_posix())
+
+    reference_errors = [r["id"] for r in records if r["reference"] and r["reference"]["error"]]
+    summary_path = write_summary(out_path)
+    print("\n" + _accuracy_lines(summary_path))
+    print(f"\nSummary: {summary_path.relative_to(PROJECT_ROOT).as_posix()}")
+    if reference_errors:
+        print(f"Reference query errors (fix these first): {', '.join(reference_errors)}")
+    return 0
+
+
+def eval_report(args) -> int:
+    path = PROJECT_ROOT / args.results
+    summary_path = write_summary(path)
+    print(_accuracy_lines(summary_path))
+    print(f"\nSummary: {_shown(summary_path)}")
+    return 0
+
+
+def _shown(path) -> str:
+    # relative inside the project, full path for files kept elsewhere
+    return path.relative_to(PROJECT_ROOT).as_posix() if path.is_relative_to(PROJECT_ROOT) else str(path)
+
+
+def _accuracy_lines(summary_path) -> str:
+    # the headline and category table from the summary, so the console and the file always agree
+    lines = summary_path.read_text(encoding="utf-8").splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("**Accuracy"))
+    end = lines.index("## Cost and speed")
+    cost = [line for line in lines[end:] if line.startswith("- ")][:4]
+    return "\n".join(lines[start:end] + cost).strip()
+
+
 def serve(args) -> int:
     import uvicorn
 
@@ -191,6 +246,20 @@ def main(argv: list[str] | None = None) -> int:
     export_parser.add_argument("--force", action="store_true", help="replace an existing file")
     export_parser.set_defaults(func=export_sqlite)
 
+    eval_parser = commands.add_parser("eval", help="run the evaluation questions and save the results")
+    eval_parser.add_argument("--pack", help="data pack to test (defaults to ASKIT_PACK)")
+    eval_parser.add_argument("--model", help="Claude model (defaults to ASKIT_MODEL)")
+    eval_parser.add_argument("--questions", help="question file relative to the project folder (default packs/<pack>/eval/questions.yaml)")
+    eval_parser.add_argument("--tag", default="", help="label added to the result file name, e.g. baseline")
+    eval_parser.add_argument("--only", nargs="+", metavar="ID", help="only these question ids")
+    eval_parser.add_argument("--category", help="only this category")
+    eval_parser.add_argument("--limit", type=int, help="only the first N questions, for cheap test runs")
+    eval_parser.set_defaults(func=evaluate)
+
+    report_parser = commands.add_parser("eval-report", help="score a saved evaluation run and write its summary (no API key needed)")
+    report_parser.add_argument("results", help="result file, relative to the project folder (e.g. eval/results/<run>.jsonl) or a full path")
+    report_parser.set_defaults(func=eval_report)
+
     serve_parser = commands.add_parser("serve", help="start the API for the web UI")
     serve_parser.add_argument("--port", type=int, default=8000)
     serve_parser.set_defaults(func=serve)
@@ -198,7 +267,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.func(args)
-    except (ConfigError, DatabaseError, PackError, LLMError, GuardrailError) as error:
+    except (ConfigError, DatabaseError, PackError, LLMError, GuardrailError, EvalError) as error:
         print(f"Error: {error}", file=sys.stderr)
         return 1
 

@@ -1,0 +1,17 @@
+# Drafted by askit init on 2026-11-11. Review every line before relying on it.
+name: olist_draft
+display_name: Brazilian E-Commerce Sales (Olist-style marketplace)
+description: Order, item, customer, seller and product data for a Brazilian online marketplace, covering orders placed from
+  September 2016 to September 2018. Includes delivery performance, customer reviews, churn-risk segments, and monthly trends
+  enriched with BRL/USD exchange rates and macroeconomic indicators.
+currency: BRL
+data_range:
+  from: '2016-09-04'
+  to: '2018-09-03'
+suggested_questions:
+- What were total orders and revenue by year?
+- Which product categories generate the most revenue?
+- How has the late delivery rate changed month by month?
+- Which sellers have the best review scores and the lowest late delivery rates?
+- How many customers are at high churn risk, and what do they spend on average?
+- How do review scores differ between Metro and Small cities?
