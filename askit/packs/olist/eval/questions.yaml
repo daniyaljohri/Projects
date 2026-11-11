@@ -4,6 +4,9 @@
 # when Askit declines or the guardrails block the query.
 # order_matters: true only when the question asks for a ranking or sequence.
 
+# the reference queries are T-SQL; the runner translates them for SQLite
+dialect: tsql
+
 questions:
 
   # simple: one view, one filter or count
