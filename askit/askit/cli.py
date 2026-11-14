@@ -169,6 +169,10 @@ def evaluate(args) -> int:
         overrides["sql_retries"] = args.retries
     if args.retrieval:
         overrides["schema_retrieval"] = args.retrieval
+    if args.self_check:
+        overrides["self_check"] = args.self_check == "on"
+    if args.check_model:
+        overrides["check_model"] = args.check_model
     if args.top_k:
         overrides["schema_top_k"] = args.top_k
     if overrides:
@@ -184,7 +188,7 @@ def evaluate(args) -> int:
     askit = Askit(settings)
     out_path = result_path(settings.model, settings.pack, settings.db_dialect, args.tag)
     retrieval = settings.schema_retrieval if settings.schema_retrieval == "off" else f"{settings.schema_retrieval}, top {settings.schema_top_k}"
-    print(f"Pack: {settings.pack} | Model: {settings.model} | Retries: {settings.sql_retries} | Schema retrieval: {retrieval}")
+    print(f"Pack: {settings.pack} | Model: {settings.model} | Retries: {settings.sql_retries} | Schema retrieval: {retrieval} | Self-check: {('on, ' + (settings.check_model or settings.model)) if settings.self_check else 'off'}")
     print(f"Database: {askit.db.describe()}")
     print(f"Questions: {len(questions)} from {questions_file.relative_to(PROJECT_ROOT).as_posix()}")
     print(f"Writing {out_path.relative_to(PROJECT_ROOT).as_posix()}\n")
@@ -300,6 +304,8 @@ def main(argv: list[str] | None = None) -> int:
     eval_parser.add_argument("--only", nargs="+", metavar="ID", help="only these question ids")
     eval_parser.add_argument("--category", help="only this category")
     eval_parser.add_argument("--limit", type=int, help="only the first N questions, for cheap test runs")
+    eval_parser.add_argument("--self-check", choices=("on", "off"), help="check each result against the question and correct it once (defaults to ASKIT_SELF_CHECK, off)")
+    eval_parser.add_argument("--check-model", help="model for the self-check (defaults to ASKIT_CHECK_MODEL, else the main model)")
     eval_parser.add_argument("--retrieval", choices=SCHEMA_RETRIEVAL_METHODS, help="schema retrieval method (defaults to ASKIT_SCHEMA_RETRIEVAL, off)")
     eval_parser.add_argument("--top-k", type=int, help="tables to send when retrieval is on (defaults to ASKIT_SCHEMA_TOP_K, 3)")
     eval_parser.add_argument("--retries", type=int, choices=range(0, MAX_SQL_RETRIES + 1), metavar="N", help="fix attempts after a failed query (defaults to ASKIT_SQL_RETRIES, 1)")

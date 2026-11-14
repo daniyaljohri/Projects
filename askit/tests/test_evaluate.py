@@ -160,6 +160,7 @@ def test_run_records_answer_and_reference(shop, tmp_path):
     assert lines[0]["sql_retries"] == 1
     assert lines[0]["schema_retrieval"] == "off" and lines[0]["schema_top_k"] is None
     assert answered["schema_tables"] == []
+    assert lines[0]["self_check"] is False and answered["self_check"] == "" and answered["first_result"] is None
 
     assert declined["outcome"] == "declined"
     assert declined["expects_decline"] is True

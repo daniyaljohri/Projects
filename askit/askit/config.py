@@ -9,6 +9,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DIALECTS = ("tsql", "sqlite")
 MAX_SQL_RETRIES = 3
 SCHEMA_RETRIEVAL_METHODS = ("off", "keyword", "embedding", "hybrid")
+SWITCH_VALUES = {"on": True, "off": False, "true": True, "false": False, "1": True, "0": False, "yes": True, "no": False}
 
 
 class ConfigError(Exception):
@@ -28,6 +29,10 @@ class Settings:
     schema_retrieval: str = "off"
     schema_top_k: int = 3
     embedding_model: str = "BAAI/bge-small-en-v1.5"
+    # a second Claude call checks that the result answers the question and may correct the query once
+    self_check: bool = False
+    # model for the self-check; empty means the same model that wrote the query
+    check_model: str = ""
 
     @property
     def pack_dir(self) -> Path:
@@ -64,6 +69,10 @@ def get_settings(require_pack: bool = True) -> Settings:
     if not top_k.isdigit() or int(top_k) < 1:
         raise ConfigError(f"ASKIT_SCHEMA_TOP_K must be a whole number of tables, at least 1, not '{top_k}'.")
 
+    self_check = os.getenv("ASKIT_SELF_CHECK", "off").strip().lower() or "off"
+    if self_check not in SWITCH_VALUES:
+        raise ConfigError(f"ASKIT_SELF_CHECK must be on or off, not '{self_check}'.")
+
     settings = Settings(
         # checked when Claude is first called, so database-only commands work without a key
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", "").strip(),
@@ -75,6 +84,8 @@ def get_settings(require_pack: bool = True) -> Settings:
         schema_retrieval=retrieval,
         schema_top_k=int(top_k),
         embedding_model=os.getenv("ASKIT_EMBEDDING_MODEL", "").strip() or "BAAI/bge-small-en-v1.5",
+        self_check=SWITCH_VALUES[self_check],
+        check_model=os.getenv("ASKIT_CHECK_MODEL", "").strip(),
     )
 
     if require_pack and not settings.pack_dir.is_dir():

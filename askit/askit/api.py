@@ -88,6 +88,7 @@ def _answer_json(answer: Answer) -> dict:
         "error": answer.error,
         "retries": answer.retries,
         "tables": answer.tables,
+        "self_check": answer.self_check,
         "seconds": round(answer.seconds, 2),
     }
 

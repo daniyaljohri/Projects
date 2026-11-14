@@ -195,6 +195,18 @@ def estimate_cost(model: str, tokens: dict) -> float | None:
     ) / 1_000_000
 
 
+def _run_cost(run: dict, records: list[dict], tokens: dict) -> float | None:
+    check_model = run.get("check_model")
+    if not check_model or check_model == run["model"]:
+        return estimate_cost(run["model"], tokens)
+    # the check calls ran on another model, so their tokens are priced at that model's rates
+    keys = tuple(tokens)
+    check = {key: sum((r.get("check_usage") or {}).get(key, 0) for r in records) for key in keys}
+    main_cost = estimate_cost(run["model"], {key: tokens[key] - check[key] for key in keys})
+    check_cost = estimate_cost(check_model, check)
+    return None if main_cost is None or check_cost is None else main_cost + check_cost
+
+
 def summarise(run: dict, records: list[dict]) -> str:
     scores = [score_record(record) for record in records]
     judged = [s for s in scores if s.passed is not None]
@@ -203,7 +215,7 @@ def summarise(run: dict, records: list[dict]) -> str:
     token_keys = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens")
     tokens = {key: sum(r["usage"].get(key, 0) for r in records) for key in token_keys}
     seconds = [r["seconds"] for r in records]
-    cost = estimate_cost(run["model"], tokens)
+    cost = _run_cost(run, records, tokens)
 
     lines = [
         f"# Evaluation: {run['pack']} pack, {run['model']}, {run['dialect']}" + (f" ({run['tag']})" if run.get("tag") else ""),
@@ -231,6 +243,7 @@ def summarise(run: dict, records: list[dict]) -> str:
         f"- Response time: {sum(seconds) / len(seconds):.1f}s average, {max(seconds):.1f}s slowest, {sum(seconds):.0f}s total",
         f"- Retries after a failed query (up to {run.get('sql_retries', 0)} per question): {len(retried)} questions retried, {rescued} of them then passed",
         _retrieval_line(run, records),
+        _self_check_line(run, records),
         f"- Tokens: {tokens['input_tokens']:,} input, {tokens['output_tokens']:,} output, "
         f"{tokens['cache_read_tokens']:,} read from cache, {tokens['cache_write_tokens']:,} written to cache",
         "- Estimated cost: " + (f"${cost:.4f} (${cost / len(records):.5f} per question), list prices" if cost is not None else f"no price listed for {run['model']}"),
@@ -252,6 +265,34 @@ def summarise(run: dict, records: list[dict]) -> str:
 
     lines += ["", "## Scoring rules", "", RULES, ""]
     return "\n".join(lines)
+
+
+def _self_check_line(run: dict, records: list[dict]) -> str:
+    if not run.get("self_check"):
+        return "- Self-check: off"
+    verdicts = Counter(r.get("self_check") or "none" for r in records)
+    helped = hurt = 0
+    for record in records:
+        reference = (record.get("reference") or {}).get("result")
+        if record.get("self_check") != "revised" or not reference or not record.get("first_result"):
+            continue
+        before = compare_results(record["first_result"], reference, record["order_matters"])[0]
+        after = compare_results(record["result"], reference, record["order_matters"])[0]
+        helped += not before and after
+        hurt += before and not after
+    revised = verdicts.get("revised", 0)
+    model = f" ({run['check_model']})" if run.get("check_model") and run["check_model"] != run["model"] else ""
+    return (f"- Self-check{model}: {verdicts.get('accepted', 0)} accepted, {revised} revised "
+            f"({helped} turned wrong into right, {hurt} turned right into wrong, {revised - helped - hurt} no change), "
+            f"{verdicts.get('kept', 0)} corrections that could not run"
+            + _check_failures(records))
+
+
+def _check_failures(records: list[dict]) -> str:
+    errors = [r.get("check_error") or "unknown error" for r in records if r.get("self_check") == "failed"]
+    if not errors:
+        return ""
+    return f"; **{len(errors)} checks failed to run**, first error: {_cell(errors[0], 200)}"
 
 
 def _retrieval_line(run: dict, records: list[dict]) -> str:

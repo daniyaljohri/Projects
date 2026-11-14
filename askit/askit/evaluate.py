@@ -114,6 +114,8 @@ def run_eval(askit: Askit, questions: list[Question], reference_dialect: str, ou
         "dialect": dialect,
         "tag": tag,
         "sql_retries": askit.settings.sql_retries,
+        "self_check": askit.settings.self_check,
+        "check_model": (askit.settings.check_model or askit.settings.model) if askit.settings.self_check else None,
         "schema_retrieval": askit.settings.schema_retrieval,
         "schema_top_k": askit.settings.schema_top_k if askit.settings.schema_retrieval != "off" else None,
         "embedding_model": askit.settings.embedding_model if askit.settings.schema_retrieval in ("embedding", "hybrid") else None,
@@ -150,7 +152,7 @@ def _evaluate_one(askit: Askit, question: Question, reference_dialect: str, dial
     except Exception as error:
         # one broken question must not end a paid-for run; the error is kept and scored as a failure
         message = str(error) if isinstance(error, (LLMError, DatabaseError)) else f"{type(error).__name__}: {error}"
-        record.update(outcome="error", text="", sql=None, error=message, result=None, seconds=0.0, retries=0, schema_tables=[],
+        record.update(outcome="error", text="", sql=None, error=message, result=None, seconds=0.0, retries=0, schema_tables=[], self_check="", first_sql=None, first_result=None,
                       usage={"calls": 0, "input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0})
     else:
         record.update(
@@ -162,6 +164,16 @@ def _evaluate_one(askit: Askit, question: Question, reference_dialect: str, dial
             seconds=round(answer.seconds, 2),
             retries=answer.retries,
             schema_tables=answer.tables,
+            self_check=answer.self_check,
+            check_error=answer.check_error,
+            first_sql=answer.first_sql,
+            first_result=_result_json(answer.first_result),
+            check_usage={
+                "input_tokens": answer.check_usage.input_tokens,
+                "output_tokens": answer.check_usage.output_tokens,
+                "cache_read_tokens": answer.check_usage.cache_read_tokens,
+                "cache_write_tokens": answer.check_usage.cache_write_tokens,
+            },
             usage={
                 "calls": answer.usage.calls,
                 "input_tokens": answer.usage.input_tokens,
