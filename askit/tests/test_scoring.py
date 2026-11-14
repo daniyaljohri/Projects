@@ -186,3 +186,84 @@ def test_eval_report_command_works_without_settings(tmp_path, monkeypatch, capsy
 
     assert main(["eval-report", str(path)]) == 0
     assert "Accuracy: 1 of 1" in capsys.readouterr().out
+
+
+def test_summary_counts_retries():
+    run = {"type": "run", "started": "x", "model": "claude-haiku-5-5", "pack": "olist", "dialect": "sqlite", "tag": "", "questions_file": "q.yaml", "sql_retries": 1}
+    fixed = record("c03", category="complex", answer=result(["n"], [[1]]), reference=result(["n"], [[1]]))
+    fixed["retries"] = 1
+    still_wrong = record("c04", category="complex", outcome="failed", reference=result(["n"], [[1]]))
+    still_wrong["retries"] = 1
+    untouched = record("s01", answer=result(["n"], [[1]]), reference=result(["n"], [[1]]))
+
+    text = summarise(run, [fixed, still_wrong, untouched])
+
+    assert "Retries after a failed query (up to 1 per question): 2 questions retried, 1 of them then passed" in text
+
+
+def test_older_runs_without_retries_still_summarise():
+    run = {"type": "run", "started": "x", "model": "m", "pack": "p", "dialect": "sqlite", "tag": "", "questions_file": "q.yaml"}
+    text = summarise(run, [record(answer=result(["n"], [[1]]), reference=result(["n"], [[1]]))])
+    assert "up to 0 per question): 0 questions retried" in text
+
+
+def test_summary_reports_schema_recall():
+    run = {"type": "run", "started": "x", "model": "claude-haiku-5-5", "pack": "olist", "dialect": "sqlite", "tag": "",
+           "questions_file": "q.yaml", "schema_retrieval": "hybrid", "schema_top_k": 2, "embedding_model": "BAAI/bge-small-en-v1.5"}
+    covered = record("q1", answer=result(["n"], [[1]]), reference=result(["n"], [[1]]))
+    covered["reference"]["sql"] = "SELECT COUNT(*) FROM chatbot.v_seller_summary"
+    covered["schema_tables"] = ["chatbot.v_seller_summary", "chatbot.v_orders_full"]
+    missed = record("q2", answer=result(["n"], [[1]]), reference=result(["n"], [[1]]))
+    missed["reference"]["sql"] = "SELECT COUNT(*) FROM chatbot.v_monthly_trends"
+    missed["schema_tables"] = ["chatbot.v_seller_summary", "chatbot.v_orders_full"]
+
+    text = summarise(run, [covered, missed])
+
+    assert "Schema retrieval: hybrid, BAAI/bge-small-en-v1.5, top 2 tables; every table the reference query needs was sent for 1 of 2 questions" in text
+
+
+def test_summary_says_when_retrieval_is_off():
+    run = {"type": "run", "started": "x", "model": "m", "pack": "p", "dialect": "sqlite", "tag": "", "questions_file": "q.yaml"}
+    assert "Schema retrieval: off (every table sent)" in summarise(run, [record(answer=result(["n"], [[1]]), reference=result(["n"], [[1]]))])
+
+
+def test_summary_counts_what_the_self_check_changed():
+    run = {"type": "run", "started": "x", "model": "m", "pack": "p", "dialect": "sqlite", "tag": "", "questions_file": "q.yaml", "self_check": True}
+    helped = record("d02", answer=result(["m"], [[11]]), reference=result(["m"], [[11]]))
+    helped.update(self_check="revised", first_result=result(["m"], [[11], [4], [3]]))
+    hurt = record("a01", answer=result(["n"], [[2]]), reference=result(["n"], [[1]]))
+    hurt.update(self_check="revised", first_result=result(["n"], [[1]]))
+    accepted = record("s01", answer=result(["n"], [[1]]), reference=result(["n"], [[1]]))
+    accepted.update(self_check="accepted")
+
+    text = summarise(run, [helped, hurt, accepted])
+
+    assert "Self-check: 1 accepted, 2 revised (1 turned wrong into right, 1 turned right into wrong, 0 no change), 0 corrections that could not run" in text
+
+
+def test_summary_says_when_self_check_is_off():
+    run = {"type": "run", "started": "x", "model": "m", "pack": "p", "dialect": "sqlite", "tag": "", "questions_file": "q.yaml"}
+    assert "- Self-check: off" in summarise(run, [record(answer=result(["n"], [[1]]), reference=result(["n"], [[1]]))])
+
+
+def test_check_tokens_are_priced_at_the_check_model():
+    run = {"type": "run", "started": "x", "model": "claude-haiku-5-5", "pack": "p", "dialect": "sqlite", "tag": "",
+           "questions_file": "q.yaml", "self_check": True, "check_model": "claude-sonnet-5-5"}
+    rec = record(answer=result(["n"], [[1]]), reference=result(["n"], [[1]]))
+    rec["usage"] = {"calls": 3, "input_tokens": 2_000_000, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0}
+    rec["check_usage"] = {"input_tokens": 1_000_000, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0}
+    rec["self_check"] = "accepted"
+
+    text = summarise(run, [rec])
+
+    # 1M Haiku input at $0.10 plus 1M Sonnet input at $2.00
+    assert "Estimated cost: $2.1000" in text
+    assert "Self-check (claude-sonnet-5-5): 1 accepted" in text
+
+
+def test_summary_shows_failed_checks():
+    run = {"type": "run", "started": "x", "model": "m", "pack": "p", "dialect": "sqlite", "tag": "", "questions_file": "q.yaml", "self_check": True}
+    rec = record(answer=result(["n"], [[1]]), reference=result(["n"], [[1]]))
+    rec.update(self_check="failed", check_error="Claude API error: model not found")
+    text = summarise(run, [rec])
+    assert "**1 checks failed to run**, first error: Claude API error: model not found" in text

@@ -12,7 +12,10 @@ MAX_ROWS = 5000
 
 
 class DatabaseError(Exception):
-    pass
+    def __init__(self, message: str, retryable: bool = True):
+        super().__init__(message)
+        # False when the database itself is unreachable; rewriting the SQL can't fix that
+        self.retryable = retryable
 
 
 @dataclass
@@ -56,7 +59,7 @@ class Database:
         if self.dialect == "sqlite":
             path = Path(self.connection)
             if not path.exists():
-                raise DatabaseError(f"SQLite file not found: {path}")
+                raise DatabaseError(f"SQLite file not found: {path}", retryable=False)
             # mode=ro: the file itself refuses writes, the SQLite version of a read-only login
             uri = f"file:{path.as_posix()}?mode=ro"
             conn = sqlite3.connect(uri, uri=True)
@@ -82,7 +85,7 @@ class Database:
         try:
             conn = self._connect(timeout)
         except driver_errors as error:
-            raise DatabaseError(f"Could not connect to {self.describe()}: {error}") from error
+            raise DatabaseError(f"Could not connect to {self.describe()}: {error}", retryable=False) from error
 
         try:
             cursor = conn.cursor()

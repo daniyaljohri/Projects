@@ -156,6 +156,11 @@ def test_run_records_answer_and_reference(shop, tmp_path):
     assert answered["reference"]["result"]["rows"] == [[2]]
     assert answered["reference"]["error"] is None
     assert answered["usage"] == {"calls": 2, "input_tokens": 200, "output_tokens": 40, "cache_read_tokens": 160, "cache_write_tokens": 0}
+    assert answered["retries"] == 0
+    assert lines[0]["sql_retries"] == 1
+    assert lines[0]["schema_retrieval"] == "off" and lines[0]["schema_top_k"] is None
+    assert answered["schema_tables"] == []
+    assert lines[0]["self_check"] is False and answered["self_check"] == "" and answered["first_result"] is None
 
     assert declined["outcome"] == "declined"
     assert declined["expects_decline"] is True

@@ -51,6 +51,30 @@ NARRATION_PROMPT = """You explain query results to a business user in plain Engl
 - If only some rows are shown, base the answer on those and don't guess about the rest."""
 
 
+FIX_PROMPT = """That query could not run. The error was:
+{error}
+
+Write a corrected query for my question, or decline if it can't be answered from these tables."""
+
+
+CHECK_PROMPT = """That query ran. This is what it returned:
+{preview}
+
+Check the result against my question before it is shown to me:
+- Does it cover exactly the period, filters and groups I asked for, no more and no less?
+- If I asked for one thing ("which", "the top", "the highest"), is it one row; if I asked for a list or top N, is it that many?
+- Is every number calculated at the level the business rules and table grain require?
+- Do the columns answer the question?
+
+If the result answers my question, call accept_result. If not, call run_query with a corrected query."""
+
+ACCEPT_TOOL = {
+    "name": "accept_result",
+    "description": "Use when the query result already answers the question correctly.",
+    "input_schema": {"type": "object", "properties": {}},
+}
+
+
 class LLMError(Exception):
     pass
 
@@ -72,11 +96,20 @@ class Usage:
         self.calls += 1
         self.seconds += seconds
 
+    def merge(self, other: "Usage") -> None:
+        self.input_tokens += other.input_tokens
+        self.output_tokens += other.output_tokens
+        self.cache_read_tokens += other.cache_read_tokens
+        self.cache_write_tokens += other.cache_write_tokens
+        self.calls += other.calls
+        self.seconds += other.seconds
+
 
 @dataclass
 class SqlDecision:
     sql: str | None = None
     decline_reason: str | None = None
+    accepted: bool = False
     usage: Usage = field(default_factory=Usage)
 
 
@@ -86,26 +119,62 @@ class LLM:
             raise ConfigError("ANTHROPIC_API_KEY is not set. Add it to .env.")
         self.model = settings.model
         self.client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        # some models refuse a forced tool call; after the first refusal every call asks with "auto" instead
+        self.forced_tools = True
 
     def _call(self, usage: Usage, **kwargs):
         started = time.perf_counter()
+        if not self.forced_tools and "tool_choice" in kwargs:
+            kwargs["tool_choice"] = {"type": "auto"}
         try:
             response = self.client.messages.create(model=self.model, **kwargs)
+        except anthropic.BadRequestError as error:
+            if "tool_choice" not in str(error) or not self.forced_tools or "tool_choice" not in kwargs:
+                raise LLMError(f"Claude API error: {error}") from error
+            # the prompt still asks for a tool call; a reply without one is caught by the caller
+            self.forced_tools = False
+            return self._call(usage, **kwargs)
         except anthropic.APIError as error:
             raise LLMError(f"Claude API error: {error}") from error
         usage.add(response, time.perf_counter() - started)
         return response
 
-    def generate_sql(self, question: str, system_prompt: str, history: list[dict] | None = None) -> SqlDecision:
+    def generate_sql(self, question: str, system_prompt: str | list[str], history: list[dict] | None = None) -> SqlDecision:
+        return self._decide(system_prompt, [*(history or []), {"role": "user", "content": question}])
+
+    def fix_sql(self, question: str, system_prompt: str | list[str], history: list[dict] | None, sql: str, error: str) -> SqlDecision:
+        # the same conversation plus the failed attempt, the way you'd read an error in SSMS and fix the line
+        messages = [
+            *(history or []),
+            {"role": "user", "content": question},
+            {"role": "assistant", "content": f"SQL I wrote:\n{sql}"},
+            {"role": "user", "content": FIX_PROMPT.format(error=error)},
+        ]
+        return self._decide(system_prompt, messages)
+
+    def check_result(self, question: str, system_prompt: str | list[str], history: list[dict] | None, sql: str, result: QueryResult) -> SqlDecision:
+        # a second look at the answer's shape, like checking a report against the request before sending it
+        messages = [
+            *(history or []),
+            {"role": "user", "content": question},
+            {"role": "assistant", "content": f"SQL I wrote:\n{sql}"},
+            {"role": "user", "content": CHECK_PROMPT.format(preview=_result_preview(result))},
+        ]
+        return self._decide(system_prompt, messages, tools=[ACCEPT_TOOL, TOOLS[0]])
+
+    def _decide(self, system_prompt: str | list[str], messages: list[dict], tools: list[dict] = TOOLS) -> SqlDecision:
+        parts = [system_prompt] if isinstance(system_prompt, str) else system_prompt
+        # the first part is the same on every call, so cache it; later parts (tables picked per question) change
+        system = [{"type": "text", "text": parts[0], "cache_control": {"type": "ephemeral"}}]
+        system += [{"type": "text", "text": part} for part in parts[1:]]
         decision = SqlDecision()
         response = self._call(
             decision.usage,
             max_tokens=SQL_MAX_TOKENS,
-            # the system prompt is identical on every call, so cache it
-            system=[{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
-            tools=TOOLS,
+            system=system,
+            tools=tools,
             tool_choice={"type": "any"},
-            messages=[*(history or []), {"role": "user", "content": question}],
+            messages=messages,
         )
 
         for block in response.content:
@@ -113,6 +182,9 @@ class LLM:
                 continue
             if block.name == "run_query" and block.input.get("sql", "").strip():
                 decision.sql = block.input["sql"].strip()
+                return decision
+            if block.name == "accept_result":
+                decision.accepted = True
                 return decision
             if block.name == "decline":
                 decision.decline_reason = block.input.get("reason", "").strip() or "I can't answer that from this data."
@@ -144,6 +216,16 @@ class LLM:
             messages=[{"role": "user", "content": _narration_message(question, result)}],
         )
         return "".join(block.text for block in response.content if block.type == "text").strip()
+
+
+def _result_preview(result: QueryResult, rows: int = 10) -> str:
+    total = f"more than {result.row_count:,}" if result.truncated else f"{result.row_count:,}"
+    lines = [f"{total} rows. Columns: {', '.join(result.columns)}"]
+    for row in result.rows[:rows]:
+        lines.append(" | ".join(format_value(row[column], column) for column in result.columns))
+    if result.row_count > rows:
+        lines.append(f"... first {rows} rows shown")
+    return "\n".join(lines)
 
 
 def _narration_message(question: str, result: QueryResult) -> str:

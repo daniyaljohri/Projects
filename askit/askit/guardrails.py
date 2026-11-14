@@ -17,7 +17,10 @@ WRITE_NODES = (
 
 
 class GuardrailError(Exception):
-    pass
+    def __init__(self, message: str, retryable: bool = False):
+        super().__init__(message)
+        # True only for SQL that could not be read; a blocked write or table is never sent back to Claude
+        self.retryable = retryable
 
 
 @dataclass
@@ -34,10 +37,10 @@ def check_sql(sql: str, dialect: str, allowed_tables: set[str]) -> CheckedQuery:
     try:
         statements = [s for s in sqlglot.parse(sql, read=dialect) if s is not None]
     except SqlglotError as error:
-        raise GuardrailError(f"The query could not be parsed: {_first_line(error)}") from error
+        raise GuardrailError(f"The query could not be parsed: {_first_line(error)}", retryable=True) from error
 
     if not statements:
-        raise GuardrailError("The query is empty.")
+        raise GuardrailError("The query is empty.", retryable=True)
     if len(statements) > 1:
         raise GuardrailError("Only one statement is allowed.")
 

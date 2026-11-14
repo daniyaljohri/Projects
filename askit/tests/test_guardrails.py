@@ -116,3 +116,19 @@ def test_sqlite_dialect():
         check_sql("SELECT name FROM sqlite_master", "sqlite", allowed)
     with pytest.raises(GuardrailError, match="Only SELECT"):
         check_sql("ATTACH DATABASE 'other.db' AS other", "sqlite", allowed)
+
+
+def test_only_unreadable_sql_is_retryable():
+    from askit.guardrails import GuardrailError, check_sql
+
+    allowed = {"chatbot.v_orders_full"}
+    for sql, retryable in [
+        ('SELECT "x FROM chatbot.v_orders_full', True),
+        ("", True),
+        ("DROP VIEW chatbot.v_orders_full", False),
+        ("SELECT * FROM gold.fact_orders", False),
+        ("SELECT 1 FROM chatbot.v_orders_full; SELECT 2 FROM chatbot.v_orders_full", False),
+    ]:
+        with pytest.raises(GuardrailError) as caught:
+            check_sql(sql, "tsql", allowed)
+        assert caught.value.retryable is retryable, sql
