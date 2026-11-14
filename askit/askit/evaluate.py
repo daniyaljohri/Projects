@@ -113,6 +113,7 @@ def run_eval(askit: Askit, questions: list[Question], reference_dialect: str, ou
         "pack": askit.pack.name,
         "dialect": dialect,
         "tag": tag,
+        "sql_retries": askit.settings.sql_retries,
         "questions_file": questions_file,
         "question_count": len(questions),
     }
@@ -146,7 +147,7 @@ def _evaluate_one(askit: Askit, question: Question, reference_dialect: str, dial
     except Exception as error:
         # one broken question must not end a paid-for run; the error is kept and scored as a failure
         message = str(error) if isinstance(error, (LLMError, DatabaseError)) else f"{type(error).__name__}: {error}"
-        record.update(outcome="error", text="", sql=None, error=message, result=None, seconds=0.0,
+        record.update(outcome="error", text="", sql=None, error=message, result=None, seconds=0.0, retries=0,
                       usage={"calls": 0, "input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0})
     else:
         record.update(
@@ -156,6 +157,7 @@ def _evaluate_one(askit: Askit, question: Question, reference_dialect: str, dial
             error=answer.error,
             result=_result_json(answer.result),
             seconds=round(answer.seconds, 2),
+            retries=answer.retries,
             usage={
                 "calls": answer.usage.calls,
                 "input_tokens": answer.usage.input_tokens,

@@ -25,6 +25,7 @@ class Answer:
     error: str | None = None
     usage: Usage = field(default_factory=Usage)
     seconds: float = 0.0
+    retries: int = 0
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 
@@ -44,24 +45,36 @@ class Askit:
         return answer
 
     def _answer(self, question: str, history: list[Answer]) -> Answer:
-        decision = self.llm.generate_sql(question, self.system_prompt, _history_messages(history))
+        messages = _history_messages(history)
+        decision = self.llm.generate_sql(question, self.system_prompt, messages)
         usage = decision.usage
+        retries = 0
 
-        if decision.decline_reason:
-            return Answer(question, "declined", decision.decline_reason, usage=usage)
+        while True:
+            if decision.decline_reason:
+                return Answer(question, "declined", decision.decline_reason, usage=usage, retries=retries)
 
-        try:
-            checked = check_sql(decision.sql, self.settings.db_dialect, self.pack.allowed_tables)
-        except GuardrailError as error:
-            return Answer(question, "blocked", f"I couldn't run that query safely: {error}", sql=decision.sql, error=str(error), usage=usage)
+            try:
+                checked = check_sql(decision.sql, self.settings.db_dialect, self.pack.allowed_tables)
+            except GuardrailError as error:
+                failure = Answer(question, "blocked", f"I couldn't run that query safely: {error}", sql=decision.sql, error=str(error), usage=usage, retries=retries)
+                retryable = error.retryable
+            else:
+                try:
+                    result = self.db.run(checked.sql)
+                except DatabaseError as error:
+                    failure = Answer(question, "failed", "The query failed when it ran. Try rephrasing the question.", sql=checked.sql, error=str(error), usage=usage, retries=retries)
+                    retryable = error.retryable
+                else:
+                    text = self.llm.narrate(question, result, usage)
+                    return Answer(question, "answered", text, sql=checked.sql, result=result, usage=usage, retries=retries)
 
-        try:
-            result = self.db.run(checked.sql)
-        except DatabaseError as error:
-            return Answer(question, "failed", "The query failed when it ran. Try rephrasing the question.", sql=checked.sql, error=str(error), usage=usage)
-
-        text = self.llm.narrate(question, result, usage)
-        return Answer(question, "answered", text, sql=checked.sql, result=result, usage=usage)
+            # a safety block is final: sending it back would teach the model how to get round the guardrails
+            if not retryable or retries >= self.settings.sql_retries:
+                return failure
+            retries += 1
+            decision = self.llm.fix_sql(question, self.system_prompt, messages, failure.sql, failure.error)
+            usage.merge(decision.usage)
 
     def _log(self, answer: Answer) -> None:
         LOG_PATH.parent.mkdir(exist_ok=True)
@@ -75,6 +88,7 @@ class Askit:
             "sql": answer.sql,
             "rows": answer.result.row_count if answer.result else None,
             "error": answer.error,
+            "retries": answer.retries,
             "input_tokens": answer.usage.input_tokens,
             "output_tokens": answer.usage.output_tokens,
             "cache_read_tokens": answer.usage.cache_read_tokens,

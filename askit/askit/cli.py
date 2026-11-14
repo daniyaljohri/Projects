@@ -3,7 +3,7 @@ import dataclasses
 import sys
 import time
 
-from askit.config import PROJECT_ROOT, ConfigError, get_settings
+from askit.config import MAX_SQL_RETRIES, PROJECT_ROOT, ConfigError, get_settings
 from askit.db import Database, DatabaseError, QueryResult
 from askit.evaluate import EvalError, load_questions, result_path, run_eval, select_questions
 from askit.guardrails import GuardrailError
@@ -161,6 +161,8 @@ def export_sqlite(args) -> int:
 def evaluate(args) -> int:
     settings = get_settings(require_pack=False)
     overrides = {key: value for key, value in (("pack", args.pack), ("model", args.model)) if value}
+    if args.retries is not None:
+        overrides["sql_retries"] = args.retries
     if overrides:
         settings = dataclasses.replace(settings, **overrides)
     if not settings.pack_dir.is_dir():
@@ -173,7 +175,7 @@ def evaluate(args) -> int:
 
     askit = Askit(settings)
     out_path = result_path(settings.model, settings.pack, settings.db_dialect, args.tag)
-    print(f"Pack: {settings.pack} | Model: {settings.model} | Database: {askit.db.describe()}")
+    print(f"Pack: {settings.pack} | Model: {settings.model} | Retries: {settings.sql_retries} | Database: {askit.db.describe()}")
     print(f"Questions: {len(questions)} from {questions_file.relative_to(PROJECT_ROOT).as_posix()}")
     print(f"Writing {out_path.relative_to(PROJECT_ROOT).as_posix()}\n")
 
@@ -207,7 +209,7 @@ def _accuracy_lines(summary_path) -> str:
     lines = summary_path.read_text(encoding="utf-8").splitlines()
     start = next(i for i, line in enumerate(lines) if line.startswith("**Accuracy"))
     end = lines.index("## Cost and speed")
-    cost = [line for line in lines[end:] if line.startswith("- ")][:4]
+    cost = [line for line in lines[end:] if line.startswith("- ")][:5]
     return "\n".join(lines[start:end] + cost).strip()
 
 
@@ -254,6 +256,7 @@ def main(argv: list[str] | None = None) -> int:
     eval_parser.add_argument("--only", nargs="+", metavar="ID", help="only these question ids")
     eval_parser.add_argument("--category", help="only this category")
     eval_parser.add_argument("--limit", type=int, help="only the first N questions, for cheap test runs")
+    eval_parser.add_argument("--retries", type=int, choices=range(0, MAX_SQL_RETRIES + 1), metavar="N", help="fix attempts after a failed query (defaults to ASKIT_SQL_RETRIES, 1)")
     eval_parser.set_defaults(func=evaluate)
 
     report_parser = commands.add_parser("eval-report", help="score a saved evaluation run and write its summary (no API key needed)")

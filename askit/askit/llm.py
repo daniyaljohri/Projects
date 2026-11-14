@@ -51,6 +51,12 @@ NARRATION_PROMPT = """You explain query results to a business user in plain Engl
 - If only some rows are shown, base the answer on those and don't guess about the rest."""
 
 
+FIX_PROMPT = """That query could not run. The error was:
+{error}
+
+Write a corrected query for my question, or decline if it can't be answered from these tables."""
+
+
 class LLMError(Exception):
     pass
 
@@ -71,6 +77,14 @@ class Usage:
         self.cache_write_tokens += getattr(response.usage, "cache_creation_input_tokens", 0) or 0
         self.calls += 1
         self.seconds += seconds
+
+    def merge(self, other: "Usage") -> None:
+        self.input_tokens += other.input_tokens
+        self.output_tokens += other.output_tokens
+        self.cache_read_tokens += other.cache_read_tokens
+        self.cache_write_tokens += other.cache_write_tokens
+        self.calls += other.calls
+        self.seconds += other.seconds
 
 
 @dataclass
@@ -97,6 +111,19 @@ class LLM:
         return response
 
     def generate_sql(self, question: str, system_prompt: str, history: list[dict] | None = None) -> SqlDecision:
+        return self._decide(system_prompt, [*(history or []), {"role": "user", "content": question}])
+
+    def fix_sql(self, question: str, system_prompt: str, history: list[dict] | None, sql: str, error: str) -> SqlDecision:
+        # the same conversation plus the failed attempt, the way you'd read an error in SSMS and fix the line
+        messages = [
+            *(history or []),
+            {"role": "user", "content": question},
+            {"role": "assistant", "content": f"SQL I wrote:\n{sql}"},
+            {"role": "user", "content": FIX_PROMPT.format(error=error)},
+        ]
+        return self._decide(system_prompt, messages)
+
+    def _decide(self, system_prompt: str, messages: list[dict]) -> SqlDecision:
         decision = SqlDecision()
         response = self._call(
             decision.usage,
@@ -105,7 +132,7 @@ class LLM:
             system=[{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
             tools=TOOLS,
             tool_choice={"type": "any"},
-            messages=[*(history or []), {"role": "user", "content": question}],
+            messages=messages,
         )
 
         for block in response.content:

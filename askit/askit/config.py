@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DIALECTS = ("tsql", "sqlite")
+MAX_SQL_RETRIES = 3
 
 
 class ConfigError(Exception):
@@ -20,6 +21,8 @@ class Settings:
     pack: str
     db_dialect: str
     db_connection: str
+    # how many times a query that failed to parse or run is sent back to Claude to fix
+    sql_retries: int = 1
 
     @property
     def pack_dir(self) -> Path:
@@ -45,6 +48,10 @@ def get_settings(require_pack: bool = True) -> Settings:
     if dialect == "sqlite" and not Path(connection).is_absolute():
         connection = str(PROJECT_ROOT / connection)
 
+    retries = os.getenv("ASKIT_SQL_RETRIES", "1").strip() or "1"
+    if not retries.isdigit() or int(retries) > MAX_SQL_RETRIES:
+        raise ConfigError(f"ASKIT_SQL_RETRIES must be a whole number from 0 to {MAX_SQL_RETRIES}, not '{retries}'.")
+
     settings = Settings(
         # checked when Claude is first called, so database-only commands work without a key
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", "").strip(),
@@ -52,6 +59,7 @@ def get_settings(require_pack: bool = True) -> Settings:
         pack=_required("ASKIT_PACK"),
         db_dialect=dialect,
         db_connection=connection,
+        sql_retries=int(retries),
     )
 
     if require_pack and not settings.pack_dir.is_dir():

@@ -86,6 +86,7 @@ def _answer_json(answer: Answer) -> dict:
         "row_count": result.row_count if result else 0,
         "truncated": result.truncated if result else False,
         "error": answer.error,
+        "retries": answer.retries,
         "seconds": round(answer.seconds, 2),
     }
 

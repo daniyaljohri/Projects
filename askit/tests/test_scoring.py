@@ -186,3 +186,22 @@ def test_eval_report_command_works_without_settings(tmp_path, monkeypatch, capsy
 
     assert main(["eval-report", str(path)]) == 0
     assert "Accuracy: 1 of 1" in capsys.readouterr().out
+
+
+def test_summary_counts_retries():
+    run = {"type": "run", "started": "x", "model": "claude-haiku-5-5", "pack": "olist", "dialect": "sqlite", "tag": "", "questions_file": "q.yaml", "sql_retries": 1}
+    fixed = record("c03", category="complex", answer=result(["n"], [[1]]), reference=result(["n"], [[1]]))
+    fixed["retries"] = 1
+    still_wrong = record("c04", category="complex", outcome="failed", reference=result(["n"], [[1]]))
+    still_wrong["retries"] = 1
+    untouched = record("s01", answer=result(["n"], [[1]]), reference=result(["n"], [[1]]))
+
+    text = summarise(run, [fixed, still_wrong, untouched])
+
+    assert "Retries after a failed query (up to 1 per question): 2 questions retried, 1 of them then passed" in text
+
+
+def test_older_runs_without_retries_still_summarise():
+    run = {"type": "run", "started": "x", "model": "m", "pack": "p", "dialect": "sqlite", "tag": "", "questions_file": "q.yaml"}
+    text = summarise(run, [record(answer=result(["n"], [[1]]), reference=result(["n"], [[1]]))])
+    assert "up to 0 per question): 0 questions retried" in text

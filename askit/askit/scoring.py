@@ -220,12 +220,15 @@ def summarise(run: dict, records: list[dict]) -> str:
         lines.append(f"| {category} | {len(group)} | {ok} | {_pct(ok, len(group))} |")
 
     outcomes = Counter(s.outcome for s in scores)
+    retried = [(r, s) for r, s in zip(records, scores) if r.get("retries", 0)]
+    rescued = sum(1 for _, s in retried if s.passed)
     lines += [
         "",
         "## Cost and speed",
         "",
         f"- Outcomes: " + ", ".join(f"{name} {count}" for name, count in sorted(outcomes.items())),
         f"- Response time: {sum(seconds) / len(seconds):.1f}s average, {max(seconds):.1f}s slowest, {sum(seconds):.0f}s total",
+        f"- Retries after a failed query (up to {run.get('sql_retries', 0)} per question): {len(retried)} questions retried, {rescued} of them then passed",
         f"- Tokens: {tokens['input_tokens']:,} input, {tokens['output_tokens']:,} output, "
         f"{tokens['cache_read_tokens']:,} read from cache, {tokens['cache_write_tokens']:,} written to cache",
         "- Estimated cost: " + (f"${cost:.4f} (${cost / len(records):.5f} per question), list prices" if cost is not None else f"no price listed for {run['model']}"),
