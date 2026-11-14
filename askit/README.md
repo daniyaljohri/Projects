@@ -18,9 +18,9 @@ It isn't tied to one database. Everything Askit knows about a database lives in 
 | Model | Claude (Haiku tier by default, configurable) |
 | Safety | Read-only login, SQL parsed and checked before it runs, row and time limits |
 | Interfaces | Web UI (React), REST API (FastAPI), command line |
-| Accuracy | 80 to 84% on 49 business questions (Haiku, SQLite), 100% of unsafe or out-of-scope requests refused. See [Evaluation](#evaluation) |
-| Cost | About one US cent for all 49 questions, 2.2 seconds per answer |
-| Tests | 142 automated tests, no database or API key needed |
+| Accuracy | 86 to 88% on 49 business questions by default (Haiku, SQLite), 94% with the optional Sonnet check; 100% of unsafe or out-of-scope requests refused. See [Evaluation](#evaluation) |
+| Cost | About one US cent for all 49 questions by default (2.6 s per answer); about 18 cents with the Sonnet check (5 s) |
+| Tests | 186 automated tests, no database or API key needed |
 
 ---
 
@@ -32,6 +32,7 @@ question
   -> Claude writes SQL    structured output: run_query(sql) or decline(reason)
   -> guardrails           parse with sqlglot: one SELECT, allowed tables only
   -> run it               read-only login, 30 second timeout, 5,000 row cap
+  -> fix it               if the SQL can't be read or the database rejects it, the error goes back to Claude once
   -> explain it           a separate call that sees only the question and the rows
   -> log it               question, SQL, outcome, tokens and time
 ```
@@ -44,6 +45,8 @@ Every answer ends in one of four outcomes, shown in the UI and the logs:
 | declined | Claude decided the data can't answer the question, so nothing ran |
 | blocked | the guardrails rejected the query before it reached the database |
 | failed | the database returned an error |
+
+Two further steps are built, measured and off by default. A **result self-check**, in which a stronger model (Sonnet) checks the result against the question and may correct the query once, raised accuracy from 86 to 88% to 94% at about 15 times the cost; turn it on when accuracy matters more than cost. **Schema retrieval**, which sends only the tables most relevant to the question, is for databases too large to send in full; on Olist it cost more without helping. See [Options](#options) and [Evaluation](#evaluation).
 
 ---
 
@@ -93,7 +96,7 @@ The eight failures common to both curated runs:
 | Platinum sellers' share of revenue | Used the seller tier on the orders view, where it doesn't exist, instead of joining to the seller summary |
 | "Is the business growing?" | Listed all 24 months with a sensible written answer, but not the like-for-like January to August comparison the reference uses |
 
-Simple and join questions were answered correctly every time, and every out-of-scope, write and injection attempt was refused in every run. Complex questions are the weak spot, at 3 to 5 of 8.
+Simple and join questions were answered correctly every time, and every out-of-scope, write and injection attempt was refused in every run. Complex questions were the weak spot, at 3 to 5 of 8. The stray-quote failures are what retry on error (below) fixes.
 
 ### What a reviewed pack adds
 
@@ -107,9 +110,25 @@ The drafted pack scored 37 of 49, against 39 and 41 for the curated pack. The to
 
 The drafted pack did no worse on complex questions, which fail for reasons the pack can't fix. That is where the next phase starts.
 
+### Improvements tested
+
+Each change was added on its own and run twice, and kept on only if it beat the run-to-run variation. Details in [docs/EVALUATION.md](docs/EVALUATION.md).
+
+| Setup | Accuracy | Complex | Cost per run | Decision |
+|---|---:|---:|---:|---|
+| Baseline (above) | 41, 39 | 4, 3 | $0.011 | |
+| **Retry on SQL error** | **42, 43** | **6, 6** | $0.012 | **On by default** |
+| + schema retrieval, hybrid, top 3 tables | 42, 39 | 6, 6 | $0.021 | Off by default |
+| + result self-check by the same model (Haiku) | 42, 42 | 6, 6 | $0.019 | Not useful |
+| **+ result self-check by Sonnet** | **46, 46** | **6, 6** | **$0.18** | **Optional, recommended for accuracy** |
+
+- **Retry on error** fixed the stray-quote failures every time it was triggered, without ever retrying a blocked write or a forbidden table.
+- **Schema retrieval** found every needed table for 88% of questions with the top 3 of 5 tables, but on a schema this small it costs more (the full prompt is cached; tables chosen per question can't be) and leaving tables out cost two questions. When a needed table was missing, the model invented table and column names. It's built for schemas too large to send in full.
+- **The self-check** depends on who checks. Haiku checking its own answers accepted all 82, including the wrong ones. Sonnet checking Haiku's answers, with the same checklist, fixed the per-order average and the "which one" answers, turned no right answer wrong, and reached 94% in both runs.
+
 ### Reproduce it
 
-The result files are committed in [`eval/results/`](eval/results/): one JSON line per question with the generated SQL, both result sets, tokens and timing, plus a markdown summary. To re-score a run without an API key or a database:
+The result files are committed in [`eval/results/`](eval/results/), with an [index of every run](eval/results/README.md): one JSON line per question with the generated SQL, both result sets, tokens and timing, plus a markdown summary. To re-score a run without an API key or a database:
 
 ```
 python -m askit eval-report eval/results/2026-11-11_claude-haiku-5-5_olist_sqlite_baseline.jsonl
@@ -121,12 +140,14 @@ To run the evaluation yourself (SQLite setup from Option A, and an API key):
 python -m askit eval --tag mine
 python -m askit eval --pack olist_draft --questions packs/olist/eval/questions.yaml --tag drafted
 python -m askit eval --only s01 a02 c04        a few questions, for a cheap check
+python -m askit retrieval-check                 schema retrieval recall, free
 ```
 
 ### Limits of this evaluation
 
 - 49 questions is a small set, and the questions were written alongside the curated pack, so they may favour its rules. Phase 4 runs Askit on a public benchmark it has never seen.
 - One model and one database. Results on SQL Server were spot-checked, not run in full.
+- Schema retrieval was tested on five views; the large-schema case it's built for is untested until Phase 4.
 - With 49 questions one question is two points, and runs vary by about two questions, so small differences are not meaningful.
 - Ambiguous questions are scored against one chosen interpretation, so a sensible answer of a different shape counts as wrong.
 
@@ -170,6 +191,8 @@ ASKIT_DB_CONNECTION=data/olist.sqlite
 2. Run the three scripts in `packs/olist/sql/` in SSMS, in order. The third one creates the `askit_reader` login and prints its password once. It needs SQL Server authentication (mixed mode) turned on.
 3. Paste the password into `ASKIT_DB_CONNECTION` in `.env` (`PWD=`).
 
+For embedding or hybrid schema retrieval (optional, off by default), also install `python -m pip install -r requirements-retrieval.txt`. It adds a 67 MB local model, downloaded on first use into `index/`.
+
 Then check the connection:
 
 ```
@@ -208,6 +231,18 @@ Then open http://localhost:3000.
 ```
 python -m pytest
 ```
+
+### Options
+
+Set in `.env`, or per run with `askit eval` flags:
+
+| Setting | Default | What it does |
+|---|---|---|
+| `ASKIT_SQL_RETRIES` | `1` | Times a query that can't be read or run is sent back to Claude with the error (0 to 3). Safety blocks are never retried |
+| `ASKIT_SCHEMA_RETRIEVAL` | `off` | `keyword`, `embedding` or `hybrid`: send only the most relevant tables. For large schemas; see [ROADMAP.md](docs/ROADMAP.md#scaling-to-larger-databases) |
+| `ASKIT_SCHEMA_TOP_K` | `3` | How many tables retrieval sends |
+| `ASKIT_SELF_CHECK` | `off` | A second call checks each result against the question and may correct the query once |
+| `ASKIT_CHECK_MODEL` | the main model | Model for the self-check. `claude-sonnet-5-5` with self-check on is the recommended accuracy setting (94% in the evaluation) |
 
 ---
 
@@ -263,7 +298,7 @@ Askit reads five views in a separate `chatbot` schema built on the warehouse's g
 
 ## Tests and checks
 
-- **142 pytest tests** that need no database and no API key: guardrail rules (allowed and blocked queries for both dialects), the data pack (every example passes the guardrails and uses only documented columns), every Olist example translated to SQLite and run, the question pipeline with Claude replaced by a stand-in, the API, the Excel export, pack drafting, the SQLite export, the evaluation runner and every scoring rule.
+- **186 pytest tests** that need no database and no API key: guardrail rules (allowed and blocked queries for both dialects), the data pack (every example passes the guardrails and uses only documented columns), every Olist example translated to SQLite and run, the question pipeline with Claude replaced by a stand-in (including retries, retrieval and the self-check), schema retrieval, the API, the Excel export, pack drafting, the SQLite export, the evaluation runner and every scoring rule. The four embedding tests are skipped without `requirements-retrieval.txt`.
 - **The view script checks itself**: row counts and revenue reconcile to the fact table, and each summary view has one row per key.
 - **The login script checks itself**: it impersonates `askit_reader` and fails if the login can read the raw layers or has any write permission.
 - **Evaluation:** 49 business questions with reference SQL, scored by comparing result sets. See [Evaluation](#evaluation).
@@ -272,14 +307,20 @@ Askit reads five views in a separate `chatbot` schema built on the warehouse's g
 
 ## Known limitations
 
-- **Complex questions are unreliable.** Multi-step queries with window functions or several CTEs were right 3 to 5 times out of 8 in the evaluation. Check the SQL behind any answer you rely on, especially for those.
+- **Complex questions are the weak spot.** Multi-step queries with window functions or several CTEs were right 6 times out of 8 with retries on. The remaining failures are reasoning slips, such as averaging line items instead of orders, which a retry can't catch. Check the SQL behind any answer you rely on.
 - **One question at a time.** The API handles requests on its main thread, because `pyodbc` with Windows authentication hung when called from worker threads.
 - **Local use only.** There are no user accounts. Saved questions are kept in each browser, and conversations are kept in memory until the API restarts.
 - **Result limits.** Queries stop after 30 seconds and 5,000 rows.
 - **The fact table has 98,666 orders,** not the 99,441 in the raw Olist data. About 775 orders have no line items (mostly cancelled or unavailable), so they never reach a line-level fact, and the data ends on 2018-09-03.
 - **Weather covers 13 cities,** about a third of orders, and is for the seller's city on the day the order was handed to the carrier.
 - **Drafted packs need review.** `askit init` can't see business definitions that live outside the data.
-- **Answers can vary** between runs and models, and each question costs two API calls.
+- **Answers can vary** between runs and models. Each question costs two API calls, three when a query is retried.
+
+---
+
+## Next steps
+
+A public benchmark on databases Askit has never seen (Phase 4), a comparison of Claude models (Phase 5), accuracy ideas such as a different checking model, and guidance on scaling to large databases are in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ---
 
@@ -307,17 +348,19 @@ askit/
 │   ├── introspect.py         schema profiling
 │   ├── onboard.py            data pack drafting
 │   ├── sqlite_export.py      SQLite copy of a pack
+│   ├── retrieval.py          schema retrieval: keyword, embedding, hybrid
 │   ├── evaluate.py           evaluation runner
 │   ├── scoring.py            result comparison and summaries
-│   └── cli.py                check, prompt, ask, chat, serve, init, export-sqlite, eval, eval-report
+│   └── cli.py                check, prompt, ask, chat, serve, init, export-sqlite, eval, eval-report, retrieval-check
 ├── packs/olist/              the Olist data pack, its evaluation questions and SQL Server setup scripts
 ├── packs/olist_draft/        the unedited drafted pack, kept as the evaluation's control
-├── eval/results/             evaluation runs and their summaries
+├── eval/results/             evaluation runs, their summaries and an index
 ├── tests/                    pytest
 ├── ui/                       React chat interface (Vite)
-├── docs/                     screenshot
+├── docs/                     EVALUATION.md, ROADMAP.md, screenshot
 ├── .env.example
 ├── requirements.txt
+├── requirements-retrieval.txt  optional: embedding and hybrid retrieval
 ├── DATA_SOURCES.md
 └── README.md
 ```
