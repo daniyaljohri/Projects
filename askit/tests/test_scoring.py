@@ -225,3 +225,45 @@ def test_summary_reports_schema_recall():
 def test_summary_says_when_retrieval_is_off():
     run = {"type": "run", "started": "x", "model": "m", "pack": "p", "dialect": "sqlite", "tag": "", "questions_file": "q.yaml"}
     assert "Schema retrieval: off (every table sent)" in summarise(run, [record(answer=result(["n"], [[1]]), reference=result(["n"], [[1]]))])
+
+
+def test_summary_counts_what_the_self_check_changed():
+    run = {"type": "run", "started": "x", "model": "m", "pack": "p", "dialect": "sqlite", "tag": "", "questions_file": "q.yaml", "self_check": True}
+    helped = record("d02", answer=result(["m"], [[11]]), reference=result(["m"], [[11]]))
+    helped.update(self_check="revised", first_result=result(["m"], [[11], [4], [3]]))
+    hurt = record("a01", answer=result(["n"], [[2]]), reference=result(["n"], [[1]]))
+    hurt.update(self_check="revised", first_result=result(["n"], [[1]]))
+    accepted = record("s01", answer=result(["n"], [[1]]), reference=result(["n"], [[1]]))
+    accepted.update(self_check="accepted")
+
+    text = summarise(run, [helped, hurt, accepted])
+
+    assert "Self-check: 1 accepted, 2 revised (1 turned wrong into right, 1 turned right into wrong, 0 no change), 0 corrections that could not run" in text
+
+
+def test_summary_says_when_self_check_is_off():
+    run = {"type": "run", "started": "x", "model": "m", "pack": "p", "dialect": "sqlite", "tag": "", "questions_file": "q.yaml"}
+    assert "- Self-check: off" in summarise(run, [record(answer=result(["n"], [[1]]), reference=result(["n"], [[1]]))])
+
+
+def test_check_tokens_are_priced_at_the_check_model():
+    run = {"type": "run", "started": "x", "model": "claude-haiku-5-5", "pack": "p", "dialect": "sqlite", "tag": "",
+           "questions_file": "q.yaml", "self_check": True, "check_model": "claude-sonnet-5-5"}
+    rec = record(answer=result(["n"], [[1]]), reference=result(["n"], [[1]]))
+    rec["usage"] = {"calls": 3, "input_tokens": 2_000_000, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0}
+    rec["check_usage"] = {"input_tokens": 1_000_000, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0}
+    rec["self_check"] = "accepted"
+
+    text = summarise(run, [rec])
+
+    # 1M Haiku input at $0.10 plus 1M Sonnet input at $2.00
+    assert "Estimated cost: $2.1000" in text
+    assert "Self-check (claude-sonnet-5-5): 1 accepted" in text
+
+
+def test_summary_shows_failed_checks():
+    run = {"type": "run", "started": "x", "model": "m", "pack": "p", "dialect": "sqlite", "tag": "", "questions_file": "q.yaml", "self_check": True}
+    rec = record(answer=result(["n"], [[1]]), reference=result(["n"], [[1]]))
+    rec.update(self_check="failed", check_error="Claude API error: model not found")
+    text = summarise(run, [rec])
+    assert "**1 checks failed to run**, first error: Claude API error: model not found" in text

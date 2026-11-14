@@ -1,8 +1,13 @@
-import json
 from pathlib import Path
 
-import numpy as np
 import pytest
+
+# numpy comes with the optional retrieval install; keyword tests run without it
+try:
+    import numpy as np
+except ImportError:
+    np = None
+needs_numpy = pytest.mark.skipif(np is None, reason="embedding tests need requirements-retrieval.txt")
 
 from askit.config import ConfigError
 from askit.evaluate import load_questions
@@ -78,17 +83,20 @@ def test_fusion_rewards_tables_high_in_either_ranking():
     assert fused[-1] == "c"
 
 
+@needs_numpy
 def test_embedding_matches_meaning_not_words(tmp_path):
     retriever = SchemaRetriever.build(OLIST, "embedding", 1, embedder=FakeEmbedder(), cache_dir=tmp_path)
     assert retriever.retrieve("Which shops are in Curitiba?") == ["chatbot.v_seller_summary"]
 
 
+@needs_numpy
 def test_hybrid_combines_both(tmp_path):
     retriever = SchemaRetriever.build(OLIST, "hybrid", 2, embedder=FakeEmbedder(), cache_dir=tmp_path)
     assert retriever.keyword and retriever.embedding
     assert "chatbot.v_seller_summary" in retriever.retrieve("Which shops have the worst seller tier?")
 
 
+@needs_numpy
 def test_embeddings_are_cached_on_disk(tmp_path):
     first = FakeEmbedder()
     EmbeddingIndex(OLIST.tables, first, tmp_path)
@@ -98,6 +106,7 @@ def test_embeddings_are_cached_on_disk(tmp_path):
     assert len(list(tmp_path.glob("schema-*.npy"))) == 1
 
 
+@needs_numpy
 def test_editing_the_pack_re_embeds(tmp_path):
     EmbeddingIndex(OLIST.tables, FakeEmbedder(), tmp_path)
     changed = OLIST.tables[:1] + [Table("x.t", "one row", "new", [Column("c", "d")])]

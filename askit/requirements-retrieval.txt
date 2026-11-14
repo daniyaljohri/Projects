@@ -1,0 +1,4 @@
+# Optional: embedding and hybrid schema retrieval (ASKIT_SCHEMA_RETRIEVAL=embedding or hybrid).
+# Keyword retrieval and everything else run on requirements.txt alone.
+-r requirements.txt
+fastembed==0.9.1

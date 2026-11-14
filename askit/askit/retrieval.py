@@ -99,7 +99,7 @@ class FastEmbedder:
         try:
             from fastembed import TextEmbedding
         except ImportError as error:
-            raise ConfigError("Embedding retrieval needs fastembed: python -m pip install -r requirements.txt") from error
+            raise ConfigError("Embedding and hybrid retrieval need fastembed: python -m pip install -r requirements-retrieval.txt") from error
         self.model_name = model
         self.model = TextEmbedding(model, cache_dir=str(INDEX_DIR / "models"))
 
