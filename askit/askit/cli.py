@@ -1,9 +1,12 @@
 import argparse
 import dataclasses
+import os
 import sys
 import time
 
-from askit.config import MAX_SQL_RETRIES, PROJECT_ROOT, ConfigError, get_settings
+from dotenv import load_dotenv
+
+from askit.config import MAX_SQL_RETRIES, PROJECT_ROOT, SCHEMA_RETRIEVAL_METHODS, ConfigError, get_settings
 from askit.db import Database, DatabaseError, QueryResult
 from askit.evaluate import EvalError, load_questions, result_path, run_eval, select_questions
 from askit.guardrails import GuardrailError
@@ -13,6 +16,7 @@ from askit.onboard import draft_pack, write_draft
 from askit.pack import PackError, load_pack
 from askit.pipeline import Answer, Askit
 from askit.prompt import build_system_prompt
+from askit.retrieval import DEFAULT_EMBEDDING_MODEL, SchemaRetriever, reference_tables, schema_recall
 from askit.scoring import write_summary
 from askit.sqlite_export import export_pack
 
@@ -163,6 +167,10 @@ def evaluate(args) -> int:
     overrides = {key: value for key, value in (("pack", args.pack), ("model", args.model)) if value}
     if args.retries is not None:
         overrides["sql_retries"] = args.retries
+    if args.retrieval:
+        overrides["schema_retrieval"] = args.retrieval
+    if args.top_k:
+        overrides["schema_top_k"] = args.top_k
     if overrides:
         settings = dataclasses.replace(settings, **overrides)
     if not settings.pack_dir.is_dir():
@@ -175,7 +183,9 @@ def evaluate(args) -> int:
 
     askit = Askit(settings)
     out_path = result_path(settings.model, settings.pack, settings.db_dialect, args.tag)
-    print(f"Pack: {settings.pack} | Model: {settings.model} | Retries: {settings.sql_retries} | Database: {askit.db.describe()}")
+    retrieval = settings.schema_retrieval if settings.schema_retrieval == "off" else f"{settings.schema_retrieval}, top {settings.schema_top_k}"
+    print(f"Pack: {settings.pack} | Model: {settings.model} | Retries: {settings.sql_retries} | Schema retrieval: {retrieval}")
+    print(f"Database: {askit.db.describe()}")
     print(f"Questions: {len(questions)} from {questions_file.relative_to(PROJECT_ROOT).as_posix()}")
     print(f"Writing {out_path.relative_to(PROJECT_ROOT).as_posix()}\n")
 
@@ -188,6 +198,39 @@ def evaluate(args) -> int:
     print(f"\nSummary: {summary_path.relative_to(PROJECT_ROOT).as_posix()}")
     if reference_errors:
         print(f"Reference query errors (fix these first): {', '.join(reference_errors)}")
+    return 0
+
+
+def retrieval_check(args) -> int:
+    # only .env is read: this command needs no database connection or API key
+    load_dotenv(PROJECT_ROOT / ".env")
+    pack_name = args.pack or os.getenv("ASKIT_PACK", "").strip()
+    if not pack_name:
+        raise ConfigError("Name a pack with --pack or set ASKIT_PACK.")
+    pack = load_pack(PROJECT_ROOT / "packs" / pack_name)
+    questions_file = PROJECT_ROOT / (args.questions or f"packs/{pack_name}/eval/questions.yaml")
+    dialect, questions = load_questions(questions_file)
+    cases = [(q.id, q.question, reference_tables(q.reference_sql, dialect)) for q in questions if q.reference_sql]
+    sizes = range(1, len(pack.tables) + 1)
+
+    print(f"Schema recall on {len(cases)} questions with reference SQL, pack {pack.name} ({len(pack.tables)} tables):")
+    print("share of questions where every table the reference query reads was retrieved\n")
+    print(f"{'method':<11}" + "".join(f"{'top ' + str(k):>8}" for k in sizes))
+    misses_at_k = {}
+    for method in args.methods:
+        retriever = SchemaRetriever.build(pack, method, args.top_k, model=os.getenv("ASKIT_EMBEDDING_MODEL", "").strip() or DEFAULT_EMBEDDING_MODEL)
+        cells = []
+        for k in sizes:
+            hits, misses = schema_recall(retriever, cases, k)
+            cells.append(f"{100 * hits / len(cases):>7.0f}%")
+            if k == args.top_k:
+                misses_at_k[method] = misses
+        print(f"{method:<11}" + "".join(cells))
+
+    for method, misses in misses_at_k.items():
+        print(f"\nMissed at top {args.top_k} with {method}: {len(misses)}")
+        for question_id, missing, got in misses:
+            print(f"  {question_id}: needs {', '.join(missing)}; got {', '.join(got)}")
     return 0
 
 
@@ -209,7 +252,8 @@ def _accuracy_lines(summary_path) -> str:
     lines = summary_path.read_text(encoding="utf-8").splitlines()
     start = next(i for i, line in enumerate(lines) if line.startswith("**Accuracy"))
     end = lines.index("## Cost and speed")
-    cost = [line for line in lines[end:] if line.startswith("- ")][:5]
+    failures = lines.index("## Failures")
+    cost = [line for line in lines[end:failures] if line.startswith("- ")]
     return "\n".join(lines[start:end] + cost).strip()
 
 
@@ -256,8 +300,17 @@ def main(argv: list[str] | None = None) -> int:
     eval_parser.add_argument("--only", nargs="+", metavar="ID", help="only these question ids")
     eval_parser.add_argument("--category", help="only this category")
     eval_parser.add_argument("--limit", type=int, help="only the first N questions, for cheap test runs")
+    eval_parser.add_argument("--retrieval", choices=SCHEMA_RETRIEVAL_METHODS, help="schema retrieval method (defaults to ASKIT_SCHEMA_RETRIEVAL, off)")
+    eval_parser.add_argument("--top-k", type=int, help="tables to send when retrieval is on (defaults to ASKIT_SCHEMA_TOP_K, 3)")
     eval_parser.add_argument("--retries", type=int, choices=range(0, MAX_SQL_RETRIES + 1), metavar="N", help="fix attempts after a failed query (defaults to ASKIT_SQL_RETRIES, 1)")
     eval_parser.set_defaults(func=evaluate)
+
+    check_parser = commands.add_parser("retrieval-check", help="measure schema retrieval on the evaluation questions (no API key or database needed)")
+    check_parser.add_argument("--pack", help="data pack (defaults to ASKIT_PACK)")
+    check_parser.add_argument("--questions", help="question file relative to the project folder (default packs/<pack>/eval/questions.yaml)")
+    check_parser.add_argument("--methods", nargs="+", choices=SCHEMA_RETRIEVAL_METHODS[1:], default=list(SCHEMA_RETRIEVAL_METHODS[1:]))
+    check_parser.add_argument("--top-k", type=int, default=3, help="list the misses at this many tables (default 3)")
+    check_parser.set_defaults(func=retrieval_check)
 
     report_parser = commands.add_parser("eval-report", help="score a saved evaluation run and write its summary (no API key needed)")
     report_parser.add_argument("results", help="result file, relative to the project folder (e.g. eval/results/<run>.jsonl) or a full path")

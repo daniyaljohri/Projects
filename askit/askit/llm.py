@@ -110,10 +110,10 @@ class LLM:
         usage.add(response, time.perf_counter() - started)
         return response
 
-    def generate_sql(self, question: str, system_prompt: str, history: list[dict] | None = None) -> SqlDecision:
+    def generate_sql(self, question: str, system_prompt: str | list[str], history: list[dict] | None = None) -> SqlDecision:
         return self._decide(system_prompt, [*(history or []), {"role": "user", "content": question}])
 
-    def fix_sql(self, question: str, system_prompt: str, history: list[dict] | None, sql: str, error: str) -> SqlDecision:
+    def fix_sql(self, question: str, system_prompt: str | list[str], history: list[dict] | None, sql: str, error: str) -> SqlDecision:
         # the same conversation plus the failed attempt, the way you'd read an error in SSMS and fix the line
         messages = [
             *(history or []),
@@ -123,13 +123,16 @@ class LLM:
         ]
         return self._decide(system_prompt, messages)
 
-    def _decide(self, system_prompt: str, messages: list[dict]) -> SqlDecision:
+    def _decide(self, system_prompt: str | list[str], messages: list[dict]) -> SqlDecision:
+        parts = [system_prompt] if isinstance(system_prompt, str) else system_prompt
+        # the first part is the same on every call, so cache it; later parts (tables picked per question) change
+        system = [{"type": "text", "text": parts[0], "cache_control": {"type": "ephemeral"}}]
+        system += [{"type": "text", "text": part} for part in parts[1:]]
         decision = SqlDecision()
         response = self._call(
             decision.usage,
             max_tokens=SQL_MAX_TOKENS,
-            # the system prompt is identical on every call, so cache it
-            system=[{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
+            system=system,
             tools=TOOLS,
             tool_choice={"type": "any"},
             messages=messages,

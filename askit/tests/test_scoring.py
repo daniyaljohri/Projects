@@ -205,3 +205,23 @@ def test_older_runs_without_retries_still_summarise():
     run = {"type": "run", "started": "x", "model": "m", "pack": "p", "dialect": "sqlite", "tag": "", "questions_file": "q.yaml"}
     text = summarise(run, [record(answer=result(["n"], [[1]]), reference=result(["n"], [[1]]))])
     assert "up to 0 per question): 0 questions retried" in text
+
+
+def test_summary_reports_schema_recall():
+    run = {"type": "run", "started": "x", "model": "claude-haiku-5-5", "pack": "olist", "dialect": "sqlite", "tag": "",
+           "questions_file": "q.yaml", "schema_retrieval": "hybrid", "schema_top_k": 2, "embedding_model": "BAAI/bge-small-en-v1.5"}
+    covered = record("q1", answer=result(["n"], [[1]]), reference=result(["n"], [[1]]))
+    covered["reference"]["sql"] = "SELECT COUNT(*) FROM chatbot.v_seller_summary"
+    covered["schema_tables"] = ["chatbot.v_seller_summary", "chatbot.v_orders_full"]
+    missed = record("q2", answer=result(["n"], [[1]]), reference=result(["n"], [[1]]))
+    missed["reference"]["sql"] = "SELECT COUNT(*) FROM chatbot.v_monthly_trends"
+    missed["schema_tables"] = ["chatbot.v_seller_summary", "chatbot.v_orders_full"]
+
+    text = summarise(run, [covered, missed])
+
+    assert "Schema retrieval: hybrid, BAAI/bge-small-en-v1.5, top 2 tables; every table the reference query needs was sent for 1 of 2 questions" in text
+
+
+def test_summary_says_when_retrieval_is_off():
+    run = {"type": "run", "started": "x", "model": "m", "pack": "p", "dialect": "sqlite", "tag": "", "questions_file": "q.yaml"}
+    assert "Schema retrieval: off (every table sent)" in summarise(run, [record(answer=result(["n"], [[1]]), reference=result(["n"], [[1]]))])

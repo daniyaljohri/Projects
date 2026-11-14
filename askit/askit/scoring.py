@@ -7,6 +7,7 @@ from itertools import product
 from pathlib import Path
 
 from askit.evaluate import EvalError
+from askit.retrieval import reference_tables
 
 # Decimals within this relative difference count as equal, so 6.77% rounded to 6.8% still passes
 RELATIVE_TOLERANCE = 0.005
@@ -229,6 +230,7 @@ def summarise(run: dict, records: list[dict]) -> str:
         f"- Outcomes: " + ", ".join(f"{name} {count}" for name, count in sorted(outcomes.items())),
         f"- Response time: {sum(seconds) / len(seconds):.1f}s average, {max(seconds):.1f}s slowest, {sum(seconds):.0f}s total",
         f"- Retries after a failed query (up to {run.get('sql_retries', 0)} per question): {len(retried)} questions retried, {rescued} of them then passed",
+        _retrieval_line(run, records),
         f"- Tokens: {tokens['input_tokens']:,} input, {tokens['output_tokens']:,} output, "
         f"{tokens['cache_read_tokens']:,} read from cache, {tokens['cache_write_tokens']:,} written to cache",
         "- Estimated cost: " + (f"${cost:.4f} (${cost / len(records):.5f} per question), list prices" if cost is not None else f"no price listed for {run['model']}"),
@@ -250,6 +252,24 @@ def summarise(run: dict, records: list[dict]) -> str:
 
     lines += ["", "## Scoring rules", "", RULES, ""]
     return "\n".join(lines)
+
+
+def _retrieval_line(run: dict, records: list[dict]) -> str:
+    method = run.get("schema_retrieval") or "off"
+    if method == "off":
+        return "- Schema retrieval: off (every table sent)"
+    covered = total = 0
+    for record in records:
+        reference = record.get("reference") or {}
+        if not reference.get("sql") or not record.get("schema_tables"):
+            continue
+        total += 1
+        sent = {name.lower() for name in record["schema_tables"]}
+        if reference_tables(reference["sql"], run["dialect"]) <= sent:
+            covered += 1
+    model = f", {run['embedding_model']}" if run.get("embedding_model") else ""
+    return (f"- Schema retrieval: {method}{model}, top {run.get('schema_top_k')} tables; "
+            f"every table the reference query needs was sent for {covered} of {total} questions")
 
 
 def write_summary(results_path: Path) -> Path:

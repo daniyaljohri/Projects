@@ -292,3 +292,88 @@ def test_retry_setting_comes_from_the_environment(monkeypatch):
         with pytest.raises(ConfigError, match="ASKIT_SQL_RETRIES"):
             get_settings()
     get_settings.cache_clear()
+
+
+# schema retrieval
+
+def test_retrieval_off_sends_the_whole_cached_prompt():
+    claude = FakeClaude(tool_call("decline", reason="No."))
+    askit = make_askit(claude, FakeDatabase())
+    answer = askit.ask("Anything")
+
+    system = claude.requests[0]["system"]
+    assert len(system) == 1 and system[0]["text"] == askit.system_prompt
+    assert answer.tables == []
+
+
+def test_retrieval_sends_only_the_chosen_tables():
+    from dataclasses import replace
+
+    claude = FakeClaude(tool_call("decline", reason="No."))
+    settings = replace(SETTINGS, schema_retrieval="keyword", schema_top_k=1)
+    answer = make_askit(claude, FakeDatabase(), settings).ask("Which seller tier has the most cancelled orders?")
+
+    head, tables = claude.requests[0]["system"]
+    assert head["cache_control"] == {"type": "ephemeral"}
+    assert "cache_control" not in tables
+    assert "### chatbot.v_seller_summary" in tables["text"]
+    assert "### chatbot.v_orders_full" not in tables["text"] + head["text"]
+    assert "## Business rules" in head["text"] and "## Examples" in head["text"]
+    assert answer.tables == ["chatbot.v_seller_summary"]
+
+
+def test_retry_uses_the_same_tables():
+    from dataclasses import replace
+
+    claude = FakeClaude(
+        tool_call("run_query", sql="SELECT seller_tier FROM chatbot.v_seller_summary \""),
+        tool_call("run_query", sql="SELECT seller_tier FROM chatbot.v_seller_summary"),
+        text("ok"),
+    )
+    settings = replace(SETTINGS, schema_retrieval="keyword", schema_top_k=1)
+    make_askit(claude, FakeDatabase(result=RESULT), settings).ask("Which seller tier has the most cancelled orders?")
+
+    assert claude.requests[0]["system"] == claude.requests[1]["system"]
+
+
+def test_follow_up_keeps_the_earlier_question_for_retrieval():
+    from dataclasses import replace
+
+    claude = FakeClaude(
+        tool_call("run_query", sql="SELECT seller_tier FROM chatbot.v_seller_summary"), text("ok"),
+        tool_call("decline", reason="No."),
+    )
+    settings = replace(SETTINGS, schema_retrieval="keyword", schema_top_k=1)
+    askit = make_askit(claude, FakeDatabase(result=RESULT), settings)
+    first = askit.ask("Which seller tier has the most cancelled orders?")
+    follow_up = askit.ask("and now just for RJ", history=[first])
+
+    assert follow_up.tables == ["chatbot.v_seller_summary"]
+
+
+def test_retrieval_settings_come_from_the_environment(monkeypatch):
+    from askit.config import ConfigError, get_settings
+
+    for name, value in [("ASKIT_DB_DIALECT", "sqlite"), ("ASKIT_DB_CONNECTION", "data/x.sqlite"), ("ASKIT_MODEL", "m"), ("ASKIT_PACK", "olist")]:
+        monkeypatch.setenv(name, value)
+    monkeypatch.delenv("ASKIT_SQL_RETRIES", raising=False)
+
+    get_settings.cache_clear()
+    monkeypatch.delenv("ASKIT_SCHEMA_RETRIEVAL", raising=False)
+    monkeypatch.delenv("ASKIT_SCHEMA_TOP_K", raising=False)
+    settings = get_settings()
+    assert (settings.schema_retrieval, settings.schema_top_k) == ("off", 3)
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("ASKIT_SCHEMA_RETRIEVAL", "Hybrid")
+    monkeypatch.setenv("ASKIT_SCHEMA_TOP_K", "2")
+    settings = get_settings()
+    assert (settings.schema_retrieval, settings.schema_top_k) == ("hybrid", 2)
+
+    for name, bad in [("ASKIT_SCHEMA_RETRIEVAL", "magic"), ("ASKIT_SCHEMA_TOP_K", "0")]:
+        get_settings.cache_clear()
+        monkeypatch.setenv(name, bad)
+        with pytest.raises(ConfigError, match=name):
+            get_settings()
+        monkeypatch.setenv(name, "keyword" if name == "ASKIT_SCHEMA_RETRIEVAL" else "2")
+    get_settings.cache_clear()

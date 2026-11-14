@@ -43,6 +43,21 @@ def _example_sql(sql: str, source: str, target: str) -> str:
 
 
 def build_system_prompt(pack: Pack, dialect: str) -> str:
+    head, tables, tail = _sections(pack, dialect)
+    return "\n\n".join(head + [tables_section(_render_table(t) for t in pack.tables)] + tail)
+
+
+def build_prompt_parts(pack: Pack, dialect: str) -> tuple[str, dict[str, str]]:
+    """The fixed part of the prompt, and each table's text, for sending only some tables per question."""
+    head, _, tail = _sections(pack, dialect)
+    return "\n\n".join(head + tail), {table.name: _render_table(table) for table in pack.tables}
+
+
+def tables_section(rendered) -> str:
+    return "## Tables\n\n" + "\n\n".join(rendered)
+
+
+def _sections(pack: Pack, dialect: str) -> tuple[list[str], None, list[str]]:
     dialect_name, notes = DIALECT_NOTES[dialect]
 
     sections = [
@@ -62,17 +77,17 @@ def build_system_prompt(pack: Pack, dialect: str) -> str:
         "- If the question is ambiguous, choose the most reasonable reading instead of asking.\n"
         "- Return the columns a reader needs to understand the answer, with clear names.",
         "## SQL dialect\n" + "\n".join(f"- {note}" for note in notes),
-        "## Tables\n\n" + "\n\n".join(_render_table(table) for table in pack.tables),
     ]
+    tail = []
 
     if pack.rules:
-        sections.append("## Business rules\n" + "\n".join(f"- {rule}" for rule in pack.rules))
+        tail.append("## Business rules\n" + "\n".join(f"- {rule}" for rule in pack.rules))
 
     if pack.examples:
         examples = [
             f"Question: {example.question}\nSQL:\n{_example_sql(example.sql, pack.examples_dialect, dialect)}"
             for example in pack.examples
         ]
-        sections.append("## Examples\n\n" + "\n\n".join(examples))
+        tail.append("## Examples\n\n" + "\n\n".join(examples))
 
-    return "\n\n".join(sections)
+    return sections, None, tail
